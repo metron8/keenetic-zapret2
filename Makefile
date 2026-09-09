@@ -12,7 +12,7 @@ SHELL := /bin/sh
 REF ?= v1.0.5.1
 # Ревизия самого пакета: меняй, если пересобираешь ту же версию zapret2.
 # Это единственный источник версии для релиза: подними — и CI выпустит тег.
-PKG_REVISION ?= 2
+PKG_REVISION ?= 3
 # Архитектура Entware. Список: make archs
 ARCH ?= mipsel-3.4
 ARCHS := mipsel-3.4 aarch64-3.10

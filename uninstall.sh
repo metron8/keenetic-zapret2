@@ -25,6 +25,8 @@ PREFIX=${ZAPRET_ROOT_PREFIX:-}
 
 ZAPRET_BIN=$PREFIX/opt/bin/zapret2
 ZAPRET_LIST_BIN=$PREFIX/opt/bin/zapret2-list
+ZAPRET_INSTALL_BIN=$PREFIX/opt/bin/zapret2-install
+ZAPRET_UNINSTALL_BIN=$PREFIX/opt/bin/zapret2-uninstall
 ZAPRET_BASE_DIR=$PREFIX/opt/zapret2
 ZAPRET_RW_DIR=$PREFIX/opt/etc/zapret2
 CONFIG=$ZAPRET_RW_DIR/config
@@ -88,7 +90,8 @@ run()
 # --- что вообще есть ----------------------------------------------------------
 
 found=0
-for p in "$ZAPRET_BASE_DIR" "$ZAPRET_RW_DIR" "$INIT" "$ZAPRET_BIN" "$NDM_HOOK"; do
+for p in "$ZAPRET_BASE_DIR" "$ZAPRET_RW_DIR" "$INIT" "$ZAPRET_BIN" "$NDM_HOOK" \
+         "$ZAPRET_INSTALL_BIN" "$ZAPRET_UNINSTALL_BIN"; do
 	[ -e "$p" ] && found=1
 done
 if [ -f "$CRONTAB" ] && grep -q "$CRON_MARK" "$CRONTAB" 2>/dev/null; then
@@ -188,8 +191,11 @@ fi
 # Каталог пакета: обычно его сносит opkg, но при сломанной установке — нет.
 run rm -rf "$ZAPRET_BASE_DIR"
 
-# Файлы пакета, если opkg до них не добрался.
-run rm -f "$INIT" "$NDM_HOOK" "$ZAPRET_BIN" "$ZAPRET_LIST_BIN"
+# Файлы пакета, если opkg до них не добрался. Среди них и сам этот скрипт, когда
+# он запущен как /opt/bin/zapret2-uninstall: это безопасно, потому что unlink не
+# закрывает уже открытый дескриптор — sh дочитает удалённый файл до конца.
+run rm -f "$INIT" "$NDM_HOOK" "$ZAPRET_BIN" "$ZAPRET_LIST_BIN" \
+          "$ZAPRET_INSTALL_BIN" "$ZAPRET_UNINSTALL_BIN"
 
 # Runtime-метки: init кладёт их в /var/run, а если он не пишется — в /tmp.
 for d in ${ZAPRET_RUNDIR:-} "$PREFIX/var/run" "$PREFIX/tmp"; do
@@ -215,7 +221,8 @@ echo
 msg "проверяю, что ничего не осталось"
 left=0
 
-for p in "$ZAPRET_BASE_DIR" "$INIT" "$NDM_HOOK" "$ZAPRET_BIN" "$ZAPRET_LIST_BIN"; do
+for p in "$ZAPRET_BASE_DIR" "$INIT" "$NDM_HOOK" "$ZAPRET_BIN" "$ZAPRET_LIST_BIN" \
+         "$ZAPRET_INSTALL_BIN" "$ZAPRET_UNINSTALL_BIN"; do
 	if [ -e "$p" ]; then
 		echo "ОСТАЛОСЬ  $p"
 		left=1

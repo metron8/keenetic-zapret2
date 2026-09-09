@@ -37,6 +37,10 @@ fi
 exit 0
 LST
 	: >"$R/opt/bin/zapret2"
+	# копии скриптов, которые пакет кладёт на роутер
+	cp "$ROOT/uninstall.sh" "$R/opt/bin/zapret2-uninstall"
+	cp "$ROOT/install.sh"   "$R/opt/bin/zapret2-install"
+	chmod 755 "$R/opt/bin/zapret2-uninstall" "$R/opt/bin/zapret2-install"
 	echo 'stub functions' >"$R/opt/zapret2/init.d-functions"
 	echo 'hook' >"$R/opt/etc/ndm/netfilter.d/50-zapret2.sh"
 	chmod 755 "$R/opt/etc/init.d/S99zapret2" "$R/opt/bin/zapret2-list" \
@@ -108,6 +112,8 @@ assert_nofile "$SB/root/opt/etc/zapret2" "r/w часть удалена вмес
 assert_nofile "$SB/root/opt/etc/init.d/S99zapret2" "init-скрипт удалён"
 assert_nofile "$SB/root/opt/etc/ndm/netfilter.d/50-zapret2.sh" "хук ndm удалён"
 assert_nofile "$SB/root/opt/bin/zapret2" "обёртка удалена"
+assert_nofile "$SB/root/opt/bin/zapret2-install" "zapret2-install удалён"
+assert_nofile "$SB/root/opt/bin/zapret2-uninstall" "zapret2-uninstall удалён"
 assert_nofile "$SB/root/var/run/zapret2.started" "метка запуска убрана"
 assert_nofile "$SB/root/var/run/zapret2.lock" "блокировка убрана"
 assert_nofile "$SB/root/var/run/nfqws2_1.pid" "pid-файл убран"
@@ -183,6 +189,23 @@ run_uninstall "$SB" --yes && rc=0 || rc=$?
 assert_eq 0 "$rc" "нет init: откат всё равно доходит до конца"
 assert_nofile "$SB/root/opt/etc/zapret2" "нет init: остатки всё равно вычищены"
 
+# --- скрипт удаляет сам себя --------------------------------------------------
+
+# Пакет кладёт uninstall.sh на роутер как /opt/bin/zapret2-uninstall, и при
+# откате он удаляет в том числе себя. Это безопасно (unlink не закрывает уже
+# открытый дескриптор), но проверить надо: если бы sh дочитывал файл заново,
+# откат обрывался бы на середине.
+setup self-delete
+env PATH="$SB/bin:$PATH" STUB_LOG="$SB/log" STUB_ROOT="$SB/root" \
+    STUB_INSTALLED=1 STUB_RULES=0 \
+    ZAPRET_ROOT_PREFIX="$SB/root" \
+    ZAPRET_CRONTAB="$SB/root/opt/etc/crontabs/root" \
+    sh "$SB/root/opt/bin/zapret2-uninstall" --yes >"$SB/out" 2>&1 && rc=0 || rc=$?
+assert_eq 0 "$rc" "запуск из пакета: скрипт доработал до конца, удалив сам себя"
+assert_grep "следов не осталось" "$SB/out" "запуск из пакета: дошёл до итоговой проверки"
+assert_nofile "$SB/root/opt/bin/zapret2-uninstall" "запуск из пакета: сам себя удалил"
+assert_nofile "$SB/root/opt/etc/zapret2" "запуск из пакета: остатки вычищены"
+
 # --- честный отчёт об остатках ------------------------------------------------
 
 # Правила в netfilter скрипт вслепую не трёт — но обязан о них сказать.
@@ -198,6 +221,7 @@ assert_nogrep "следов не осталось" "$SB/out" "остались �
 setup nothing
 rm -rf "$SB/root/opt/zapret2" "$SB/root/opt/etc/zapret2" \
        "$SB/root/opt/etc/init.d/S99zapret2" "$SB/root/opt/bin/zapret2" \
+       "$SB/root/opt/bin/zapret2-install" "$SB/root/opt/bin/zapret2-uninstall" \
        "$SB/root/opt/etc/ndm/netfilter.d/50-zapret2.sh"
 printf '0 5 * * * /opt/bin/чужой-скрипт\n' >"$SB/root/opt/etc/crontabs/root"
 run_uninstall "$SB" --yes && rc=0 || rc=$?

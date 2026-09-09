@@ -55,6 +55,10 @@ for arch in mipsel-3.4 aarch64-3.10; do
 	mkdir -p "$d/data"; tar -C "$d/data" -xzf "$d/data.tar.gz"
 	assert_file "$d/data/./opt/zapret2/nfq2/nfqws2"        "$arch: nfqws2 на месте"
 	assert_file "$d/data/./opt/zapret2/init.d/sysv/functions" "$arch: functions на месте"
+	# Скрипты установки и отката едут на роутер: откат должен быть доступен и
+	# тогда, когда интернета уже нет.
+	assert_file "$d/data/./opt/bin/zapret2-install"        "$arch: zapret2-install в пакете"
+	assert_file "$d/data/./opt/bin/zapret2-uninstall"      "$arch: zapret2-uninstall в пакете"
 	assert_file "$d/data/./opt/etc/zapret2/config"         "$arch: config на месте"
 	assert_file "$d/data/./opt/zapret2/blockcheck2.sh"     "$arch: blockcheck2 на месте"
 	assert_nofile "$d/data/./opt/zapret2/nfq2/nfqws.c"     "$arch: исходники не попали"

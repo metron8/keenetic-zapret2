@@ -39,6 +39,8 @@ Keenetic значениями.
 /opt/etc/ndm/netfilter.d/50-zapret2.sh
 /opt/bin/zapret2                    # обёртка: zapret2 start|status|check|...
 /opt/bin/zapret2-list               # обёртка над ipset/get_*.sh с правильным ZAPRET_RW
+/opt/bin/zapret2-install            # копия install.sh: обновление на новый релиз
+/opt/bin/zapret2-uninstall          # копия uninstall.sh: полный откат без интернета
 ```
 
 ## Требования к роутеру
@@ -170,6 +172,7 @@ sh /opt/tmp/install.sh
 | `--lists=SCRIPT` | качать другим скриптом (`zapret2-list --list` покажет варианты) |
 | `--hostlist` | режим `hostlist`: только скачанный список, без самопополнения |
 | `--no-cron` | не добавлять автообновление списка в cron |
+| `--tag=TAG` | поставить конкретный релиз (так же обновляются на новую версию) |
 | `--no-start` | только поставить и настроить, firewall не трогать |
 | `--force-start` | запустить, даже если `check` нашёл проблемы |
 | `--force` | переустановить ту же версию |
@@ -340,6 +343,16 @@ zapret2-list --cron on
 сервис, снимает строку автообновления из cron, удаляет пакет через opkg и
 вычищает то, что opkg намеренно оставляет — conffiles, скачанные и автособранные
 списки, `config.bak`, runtime-метки, скачанные `.ipk` в `/opt/tmp`.
+
+Скрипт едет вместе с пакетом, так что качать его не нужно:
+
+```bash
+zapret2-uninstall
+```
+
+Это важнее, чем кажется: если zapret2 положит интернет, скачать скрипт через
+`curl` будет уже нечем — а откатываться надо именно тогда. Если пакет вообще не
+установился, есть и сетевой путь:
 
 ```bash
 curl -fL -o /opt/tmp/uninstall.sh https://raw.githubusercontent.com/metron8/keenetic-zapret2/main/uninstall.sh

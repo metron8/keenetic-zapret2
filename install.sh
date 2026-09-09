@@ -27,7 +27,7 @@ set -e
 REPO=metron8/keenetic-zapret2
 # Тег релиза, из которого ставим. Должен совпадать с REF+PKG_REVISION в Makefile —
 # это сторожит тест t/120-version-consistency.sh. Переопределяется ключом --tag.
-TAG=v1.0.5.1-2
+TAG=v1.0.5.1-3
 
 # Переопределяются только тестами; в бою пусты/дефолтны.
 PREFIX=${ZAPRET_ROOT_PREFIX:-}

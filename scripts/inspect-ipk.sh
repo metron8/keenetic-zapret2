@@ -65,12 +65,16 @@ fi
 
 echo "--- содержимое ---"
 for f in ./opt/etc/init.d/S99zapret2 ./opt/etc/ndm/netfilter.d/50-zapret2.sh \
-         ./opt/bin/zapret2 ./opt/zapret2/nfq2/nfqws2 ./opt/zapret2/mdig/mdig \
+         ./opt/bin/zapret2 ./opt/bin/zapret2-list \
+         ./opt/bin/zapret2-install ./opt/bin/zapret2-uninstall \
+         ./opt/zapret2/nfq2/nfqws2 ./opt/zapret2/mdig/mdig \
          ./opt/zapret2/ip2net/ip2net ./opt/zapret2/init.d/sysv/functions \
          ./opt/zapret2/common/base.sh ./opt/etc/zapret2/config; do
 	if [ -f "$TMP/d/$f" ]; then ok "$f"; else fail "нет $f"; fi
 done
-for f in ./opt/etc/init.d/S99zapret2 ./opt/etc/ndm/netfilter.d/50-zapret2.sh ./opt/bin/zapret2 \
+for f in ./opt/etc/init.d/S99zapret2 ./opt/etc/ndm/netfilter.d/50-zapret2.sh \
+         ./opt/bin/zapret2 ./opt/bin/zapret2-list \
+         ./opt/bin/zapret2-install ./opt/bin/zapret2-uninstall \
          ./opt/zapret2/nfq2/nfqws2 ./opt/zapret2/mdig/mdig ./opt/zapret2/ip2net/ip2net; do
 	if [ -x "$TMP/d/$f" ]; then ok "$f исполняемый"; else fail "$f не исполняемый"; fi
 done

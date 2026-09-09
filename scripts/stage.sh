@@ -25,6 +25,14 @@ mkdir -p "$OUT$ZAPRET_BASE"
 # 1. Наши файлы: init-скрипт, хук ndm, конфиг, обёртки в /opt/bin
 cp -a "$HERE/package/root/." "$OUT/"
 
+# Скрипты установки и отката едут на роутер вместе с пакетом. Для отката это
+# принципиально: если zapret2 положит интернет, скачать uninstall.sh через curl
+# будет уже нечем, а откатываться надо именно тогда.
+# Живут они в корне репозитория (оттуда их качают через raw.githubusercontent),
+# сюда копируются при сборке — чтобы не держать две расходящиеся копии.
+cp -a "$HERE/install.sh"   "$OUT/opt/bin/zapret2-install"
+cp -a "$HERE/uninstall.sh" "$OUT/opt/bin/zapret2-uninstall"
+
 # 2. Runtime-часть upstream. Исходники (nfq2/*.c, mdig, ip2net), docs и Makefile
 #    в пакет не кладём — на роутере они бесполезны.
 for d in common ipset lua files; do
@@ -66,7 +74,8 @@ find "$OUT" -type d -exec chmod 755 {} +
 find "$OUT" -type f -exec chmod 644 {} +
 chmod 755 "$OUT$ZAPRET_BASE/nfq2/nfqws2" "$OUT$ZAPRET_BASE/mdig/mdig" "$OUT$ZAPRET_BASE/ip2net/ip2net"
 chmod 755 "$OUT/opt/etc/init.d/S99zapret2" "$OUT/opt/etc/ndm/netfilter.d/50-zapret2.sh"
-chmod 755 "$OUT/opt/bin/zapret2" "$OUT/opt/bin/zapret2-list"
+chmod 755 "$OUT/opt/bin/zapret2" "$OUT/opt/bin/zapret2-list" \
+          "$OUT/opt/bin/zapret2-install" "$OUT/opt/bin/zapret2-uninstall"
 find "$OUT$ZAPRET_BASE/ipset" -name '*.sh' -exec chmod 755 {} + 2>/dev/null || true
 if [ -f "$OUT$ZAPRET_BASE/blockcheck2.sh" ]; then
 	chmod 755 "$OUT$ZAPRET_BASE/blockcheck2.sh"

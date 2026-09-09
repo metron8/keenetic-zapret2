@@ -51,6 +51,7 @@ else
 	echo "zapret2:   zapret2 start     # запустить"
 	echo "zapret2:   zapret2 status    # проверить"
 	echo "zapret2: автозапуск при монтировании /opt уже включён (S99zapret2)."
+	echo "zapret2: полный откат, если что-то пойдёт не так: zapret2-uninstall"
 fi
 
 exit 0
