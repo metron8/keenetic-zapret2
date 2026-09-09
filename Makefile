@@ -96,7 +96,7 @@ test:
 # Синтаксическая проверка всего, что уезжает на роутер, плюс сборочных скриптов
 check:
 	@rc=0; \
-	for f in scripts/*.sh tests/run.sh tests/t/*.sh \
+	for f in install.sh scripts/*.sh tests/run.sh tests/t/*.sh \
 	         package/control/postinst package/control/prerm package/control/postrm \
 	         package/root/opt/etc/init.d/S99zapret2 package/root/opt/etc/ndm/netfilter.d/*.sh \
 	         package/root/opt/bin/* package/root/opt/etc/zapret2/config \
