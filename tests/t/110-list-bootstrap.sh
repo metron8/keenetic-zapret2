@@ -44,7 +44,7 @@ list_run()
 	    STUB_LOG="$sb/log" \
 	    STUB_LIST_RC="${STUB_LIST_RC-0}" STUB_LIST_EMPTY="${STUB_LIST_EMPTY-0}" \
 	    ZAPRET_BOOTSTRAP_SCRIPT="${ZAPRET_BOOTSTRAP_SCRIPT-get_reestr_resolvable_domains.sh}" \
-	    ZAPRET_BOOTSTRAP_MODE="${ZAPRET_BOOTSTRAP_MODE-hostlist}" \
+	    ZAPRET_BOOTSTRAP_MODE="${ZAPRET_BOOTSTRAP_MODE-}" \
 	    sh "$LISTTOOL" "$@" >"$sb/out" 2>&1
 }
 
@@ -55,13 +55,14 @@ list_run "$SB" --bootstrap && rc=0 || rc=$?
 assert_eq 0 "$rc" "bootstrap: код возврата 0"
 assert_grep "getlist get_reestr_resolvable_domains.sh" "$SB/log" "bootstrap зовёт скрипт по умолчанию"
 assert_file "$SB/rw/ipset/zapret-hosts.txt.gz" "список лёг на диск"
-assert_grep '^MODE_FILTER=hostlist$' "$SB/rw/config" "режим переключён на hostlist"
+assert_grep '^MODE_FILTER=autohostlist$' "$SB/rw/config" "по умолчанию включается autohostlist"
 assert_grep '^GETLIST=get_reestr_resolvable_domains.sh$' "$SB/rw/config" "GETLIST прописан"
 assert_file "$SB/rw/config.bak" "прежний конфиг сохранён"
 
 # --- провалы: режим обязан остаться none --------------------------------------
-# Это главный инвариант. hostlist с пустым списком = nfqws не обрабатывает
-# ничего, то есть молча неработающий обход при живом сервисе.
+# Главный инвариант. Без файла списка под фильтр не подпадает ни один домен:
+# в hostlist это навсегда, в autohostlist — до тех пор, пока nfqws не доучится
+# на сбоях. Оба варианта хуже none, где всё работает сразу.
 
 setup fail-rc
 STUB_LIST_RC=2 list_run "$SB" --bootstrap && rc=0 || rc=$?
@@ -94,13 +95,13 @@ setup present
 echo x | gzip -9c >"$SB/rw/ipset/zapret-hosts.txt.gz"
 list_run "$SB" --bootstrap
 assert_nogrep "getlist" "$SB/log" "список уже есть: повторно не качается"
-assert_grep '^MODE_FILTER=hostlist$' "$SB/rw/config" "список уже есть: режим всё равно включается"
+assert_grep '^MODE_FILTER=autohostlist$' "$SB/rw/config" "список уже есть: режим всё равно включается"
 
 # --- параметризация -----------------------------------------------------------
 
-setup mode-auto
-ZAPRET_BOOTSTRAP_MODE=autohostlist list_run "$SB" --bootstrap
-assert_grep '^MODE_FILTER=autohostlist$' "$SB/rw/config" "режим bootstrap задаётся переменной"
+setup mode-plain
+ZAPRET_BOOTSTRAP_MODE=hostlist list_run "$SB" --bootstrap
+assert_grep '^MODE_FILTER=hostlist$' "$SB/rw/config" "режим bootstrap задаётся переменной"
 
 setup script-arg
 list_run "$SB" --bootstrap get_antizapret_domains.sh
@@ -172,7 +173,7 @@ postinst_run()
 setup_postinst pi-fresh
 postinst_run "$SB"
 assert_grep "getlist get_reestr_resolvable_domains.sh" "$SB/log" "postinst: чистая установка качает список"
-assert_grep '^MODE_FILTER=hostlist$' "$SB/root/opt/etc/zapret2/config" "postinst: режим переключён"
+assert_grep '^MODE_FILTER=autohostlist$' "$SB/root/opt/etc/zapret2/config" "postinst: режим переключён"
 
 setup_postinst pi-optout
 ZAPRET_NO_LISTS=1 postinst_run "$SB"

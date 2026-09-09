@@ -233,7 +233,7 @@ setup lists-ok
 run_install "$SB"
 assert_grep "getlist get_reestr_resolvable_domains.sh" "$SB/log" "список качается по умолчанию"
 assert_file "$SB/root/opt/etc/zapret2/ipset/zapret-hosts.txt.gz" "список лёг на диск"
-assert_grep '^MODE_FILTER=hostlist$' "$SB/root/opt/etc/zapret2/config" "после загрузки включается hostlist"
+assert_grep '^MODE_FILTER=autohostlist$' "$SB/root/opt/etc/zapret2/config" "после загрузки включается autohostlist"
 assert_grep '^GETLIST=get_reestr_resolvable_domains.sh$' "$SB/root/opt/etc/zapret2/config" "GETLIST прописан для будущих обновлений"
 
 # Главный предохранитель: hostlist с пустым списком означает, что nfqws не
@@ -252,9 +252,9 @@ run_install "$SB" --no-lists
 assert_nogrep "getlist" "$SB/log" "--no-lists: список не качается"
 assert_grep '^MODE_FILTER=none$' "$SB/root/opt/etc/zapret2/config" "--no-lists: режим не меняется"
 
-setup lists-auto
-run_install "$SB" --autohostlist
-assert_grep '^MODE_FILTER=autohostlist$' "$SB/root/opt/etc/zapret2/config" "--autohostlist: включается самопополняемый режим"
+setup lists-plain
+run_install "$SB" --hostlist
+assert_grep '^MODE_FILTER=hostlist$' "$SB/root/opt/etc/zapret2/config" "--hostlist: простой режим без самопополнения"
 
 setup lists-custom
 run_install "$SB" --lists=get_antizapret_domains.sh

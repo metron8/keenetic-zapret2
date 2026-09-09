@@ -11,7 +11,7 @@
 #   3. ставит пакет через opkg;
 #   4. прописывает IFACE_WAN в конфиг, если он ещё не задан (автоопределение по
 #      маршруту по умолчанию — ровно так же, как это делает сам пакет);
-#   5. скачивает список доменов и включает MODE_FILTER=hostlist;
+#   5. скачивает список доменов и включает MODE_FILTER=autohostlist;
 #   6. прогоняет `zapret2 check`;
 #   7. запускает сервис ТОЛЬКО если check прошёл без ошибок.
 #
@@ -41,7 +41,7 @@ START_MODE=auto   # auto | never | always
 VERIFY=1
 FORCE=0
 WANT_LISTS=1
-LIST_MODE=hostlist
+LIST_MODE=autohostlist
 # Берём именно этот скрипт: он скачивает доменный список ПЕРВЫМ делом и лишь
 # потом трогает ipset. У get_refilter_domains.sh и get_antizapret_domains.sh
 # порядок обратный — на роутере без компонента IPset они выйдут, не скачав
@@ -71,7 +71,7 @@ usage()
   --ipk=PATH      взять готовый .ipk с диска, ничего не качать
   --no-lists      не качать список доменов, оставить MODE_FILTER=none
   --lists=SCRIPT  качать другим скриптом (см. zapret2-list --list)
-  --autohostlist  режим autohostlist: список плюс самопополнение по блокировкам
+  --hostlist      режим hostlist: только скачанный список, без самопополнения
   --no-start      не запускать сервис вообще, только поставить и настроить
   --force-start   запускать даже если `zapret2 check` нашёл проблемы
   --no-verify     не сверять sha256 скачанного пакета (не надо так)
@@ -79,9 +79,10 @@ usage()
   -h, --help      это сообщение
 
 По умолчанию сервис запускается, только если `zapret2 check` прошёл чисто.
-По умолчанию скачивается список доменов и включается MODE_FILTER=hostlist.
-Если список скачать не удалось, режим остаётся none: hostlist с пустым списком
-означал бы, что обход молча не работает вовсе.
+По умолчанию скачивается список доменов и включается MODE_FILTER=autohostlist:
+скачанный список плюс самопополнение по признакам блокировки.
+Если список скачать не удалось, режим остаётся none — так обход работает сразу
+и по всему трафику, а не по мере доучивания.
 USAGE
 }
 
@@ -95,7 +96,7 @@ for a in "$@"; do
 		--ipk=*)      IPK=${a#--ipk=} ;;
 		--no-lists)   WANT_LISTS=0 ;;
 		--lists=*)    LIST_SCRIPT=${a#--lists=} ;;
-		--autohostlist) LIST_MODE=autohostlist ;;
+		--hostlist)   LIST_MODE=hostlist ;;
 		--no-start)   START_MODE=never ;;
 		--force-start) START_MODE=always ;;
 		--no-verify)  VERIFY=0 ;;
