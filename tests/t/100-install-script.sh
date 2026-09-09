@@ -24,6 +24,7 @@ WS_USER=nobody
 FWTYPE=iptables
 #IFACE_WAN=ppp0
 NFQWS2_OPT="stub"
+MODE_FILTER=none
 CFG
 	fi
 
@@ -50,10 +51,11 @@ case "$1" in
 		[ -n "$STUB_INSTALLED" ] && echo "zapret2 - $STUB_INSTALLED"
 		;;
 	install)
-		mkdir -p "$STUB_ROOT/opt/etc/zapret2" "$STUB_ROOT/opt/bin"
+		mkdir -p "$STUB_ROOT/opt/etc/zapret2/ipset" "$STUB_ROOT/opt/bin"
 		cp "$STUB_CONFIG_TMPL" "$STUB_ROOT/opt/etc/zapret2/config"
 		cp "$STUB_ZAPRET" "$STUB_ROOT/opt/bin/zapret2"
-		chmod 755 "$STUB_ROOT/opt/bin/zapret2"
+		cp "$STUB_LIST" "$STUB_ROOT/opt/bin/zapret2-list"
+		chmod 755 "$STUB_ROOT/opt/bin/zapret2" "$STUB_ROOT/opt/bin/zapret2-list"
 		;;
 esac
 exit 0
@@ -77,6 +79,20 @@ if [ -f "$STUB_REL/$name" ]; then cp "$STUB_REL/$name" "$dest"; exit 0; fi
 exit 22
 CURL
 
+	# Стаб zapret2-list: по умолчанию «скачивает» список, при STUB_LIST_RC!=0
+	# падает, при STUB_LIST_EMPTY=1 отрабатывает успешно, но файла не создаёт —
+	# это разные способы провалиться, и оба должны оставить MODE_FILTER=none.
+	cat >"$SB/zapret2-list.stub" <<'LST'
+#!/bin/sh
+echo "zapret2-list $*" >>"$STUB_LOG"
+if [ "${STUB_LIST_RC:-0}" != 0 ]; then exit "$STUB_LIST_RC"; fi
+if [ "${STUB_LIST_EMPTY:-0}" != 1 ]; then
+	mkdir -p "$STUB_ROOT/opt/etc/zapret2/ipset"
+	echo "example.com" | gzip -9c >"$STUB_ROOT/opt/etc/zapret2/ipset/zapret-hosts.txt.gz"
+fi
+exit 0
+LST
+
 	cat >"$SB/zapret2.stub" <<'ZAP'
 #!/bin/sh
 echo "zapret2 $*" >>"$STUB_LOG"
@@ -87,7 +103,7 @@ esac
 exit 0
 ZAP
 
-	chmod 755 "$SB/bin/opkg" "$SB/bin/curl" "$SB/zapret2.stub"
+	chmod 755 "$SB/bin/opkg" "$SB/bin/curl" "$SB/zapret2.stub" "$SB/zapret2-list.stub"
 }
 
 # run_install <песочница> [ключи...] — код возврата остаётся в $?
@@ -97,6 +113,8 @@ run_install()
 	env PATH="$sb/bin:$PATH" \
 	    STUB_LOG="$sb/log" STUB_REL="$sb/rel" STUB_ROOT="$sb/root" \
 	    STUB_CONFIG_TMPL="$sb/config.tmpl" STUB_ZAPRET="$sb/zapret2.stub" \
+	    STUB_LIST="$sb/zapret2-list.stub" \
+	    STUB_LIST_RC="${STUB_LIST_RC-0}" STUB_LIST_EMPTY="${STUB_LIST_EMPTY-0}" \
 	    STUB_ARCH="${STUB_ARCH-mipsel-3.4}" \
 	    STUB_INSTALLED="${STUB_INSTALLED-}" \
 	    STUB_CHECK_RC="${STUB_CHECK_RC-0}" \
@@ -177,7 +195,7 @@ WS_USER=nobody
 IFACE_WAN=nwg0
 CFG
 setup iface-preset "$TMP/cfg-with-iface"
-run_install "$SB"
+run_install "$SB" --no-lists
 assert_grep '^IFACE_WAN=nwg0$' "$SB/root/opt/etc/zapret2/config" "уже заданный IFACE_WAN не перезаписан"
 assert_nofile "$SB/root/opt/etc/zapret2/config.bak" "конфиг не трогали — бэкап не нужен"
 
@@ -200,6 +218,58 @@ setup iface-none
 printf 'Iface\tDestination\tGateway\n' >"$SB/route"
 run_install "$SB" && rc=0 || rc=$?
 assert_ne 0 "$rc" "нет маршрута по умолчанию: скрипт останавливается"
+
+# --- списки доменов -----------------------------------------------------------
+
+setup lists-ok
+run_install "$SB"
+assert_grep "zapret2-list get_reestr_resolvable_domains.sh" "$SB/log" "список качается по умолчанию"
+assert_file "$SB/root/opt/etc/zapret2/ipset/zapret-hosts.txt.gz" "список лёг на диск"
+assert_grep '^MODE_FILTER=hostlist$' "$SB/root/opt/etc/zapret2/config" "после загрузки включается hostlist"
+assert_grep '^GETLIST=get_reestr_resolvable_domains.sh$' "$SB/root/opt/etc/zapret2/config" "GETLIST прописан для будущих обновлений"
+
+# Главный предохранитель: hostlist с пустым списком означает, что nfqws не
+# обрабатывает ничего. Если скачать не удалось — режим обязан остаться none.
+setup lists-download-failed
+STUB_LIST_RC=2 run_install "$SB"
+assert_grep '^MODE_FILTER=none$' "$SB/root/opt/etc/zapret2/config" "скрипт списка упал: MODE_FILTER остаётся none"
+assert_nogrep '^GETLIST=' "$SB/root/opt/etc/zapret2/config" "скрипт списка упал: GETLIST не прописан"
+
+setup lists-empty
+STUB_LIST_EMPTY=1 run_install "$SB"
+assert_grep '^MODE_FILTER=none$' "$SB/root/opt/etc/zapret2/config" "скрипт отработал, но файла нет: MODE_FILTER остаётся none"
+
+setup lists-off
+run_install "$SB" --no-lists
+assert_nogrep "zapret2-list" "$SB/log" "--no-lists: список не качается"
+assert_grep '^MODE_FILTER=none$' "$SB/root/opt/etc/zapret2/config" "--no-lists: режим не меняется"
+
+setup lists-auto
+run_install "$SB" --autohostlist
+assert_grep '^MODE_FILTER=autohostlist$' "$SB/root/opt/etc/zapret2/config" "--autohostlist: включается самопополняемый режим"
+
+setup lists-custom
+run_install "$SB" --lists=get_antizapret_domains.sh
+assert_grep "zapret2-list get_antizapret_domains.sh" "$SB/log" "--lists выбирает другой скрипт"
+
+cat >"$TMP/cfg-filter-set" <<'CFG'
+WS_USER=nobody
+IFACE_WAN=ppp0
+MODE_FILTER=autohostlist
+CFG
+setup lists-preset "$TMP/cfg-filter-set"
+run_install "$SB"
+assert_nogrep "zapret2-list" "$SB/log" "уже настроенный MODE_FILTER: список не перекачивается"
+assert_grep '^MODE_FILTER=autohostlist$' "$SB/root/opt/etc/zapret2/config" "уже настроенный MODE_FILTER не перезаписан"
+
+# Список должен лечь ДО старта: иначе демон поднимется с пустым фильтром.
+setup lists-order
+run_install "$SB"
+order=$(grep -n "zapret2-list\|zapret2 start" "$SB/log" | head -2 | cut -d: -f2- | tr '\n' '|')
+case "$order" in
+	"zapret2-list "*"|zapret2 start"*) ok "список качается раньше старта сервиса" ;;
+	*) bad "список качается раньше старта сервиса (порядок: $order)" ;;
+esac
 
 # --- запуск сервиса -----------------------------------------------------------
 

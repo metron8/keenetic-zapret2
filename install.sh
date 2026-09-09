@@ -11,8 +11,9 @@
 #   3. ставит пакет через opkg;
 #   4. прописывает IFACE_WAN в конфиг, если он ещё не задан (автоопределение по
 #      маршруту по умолчанию — ровно так же, как это делает сам пакет);
-#   5. прогоняет `zapret2 check`;
-#   6. запускает сервис ТОЛЬКО если check прошёл без ошибок.
+#   5. скачивает список доменов и включает MODE_FILTER=hostlist;
+#   6. прогоняет `zapret2 check`;
+#   7. запускает сервис ТОЛЬКО если check прошёл без ошибок.
 #
 # Стратегию обхода (NFQWS2_OPT) скрипт не подбирает: это делает blockcheck2 на
 # самом роутере и это долго. Скрипт напомнит про него в конце.
@@ -39,9 +40,18 @@ IPK=
 START_MODE=auto   # auto | never | always
 VERIFY=1
 FORCE=0
+WANT_LISTS=1
+LIST_MODE=hostlist
+# Берём именно этот скрипт: он скачивает доменный список ПЕРВЫМ делом и лишь
+# потом трогает ipset. У get_refilter_domains.sh и get_antizapret_domains.sh
+# порядок обратный — на роутере без компонента IPset они выйдут, не скачав
+# ничего.
+LIST_SCRIPT=get_reestr_resolvable_domains.sh
 
 CONFIG=$PREFIX/opt/etc/zapret2/config
 ZAPRET_BIN=$PREFIX/opt/bin/zapret2
+ZAPRET_LIST_BIN=$PREFIX/opt/bin/zapret2-list
+HOSTLIST_DIR=$PREFIX/opt/etc/zapret2/ipset
 TMPDIR_R=$PREFIX/opt/tmp
 
 msg()  { echo "==> $*"; }
@@ -60,6 +70,9 @@ usage()
   --iface=IFACE   не определять WAN, вписать этот интерфейс (ppp0, eth3, nwg0 ...)
   --tag=TAG       ставить из этого релиза (по умолчанию встроенный в скрипт)
   --ipk=PATH      взять готовый .ipk с диска, ничего не качать
+  --no-lists      не качать список доменов, оставить MODE_FILTER=none
+  --lists=SCRIPT  качать другим скриптом (см. zapret2-list --list)
+  --autohostlist  режим autohostlist: список плюс самопополнение по блокировкам
   --no-start      не запускать сервис вообще, только поставить и настроить
   --force-start   запускать даже если `zapret2 check` нашёл проблемы
   --no-verify     не сверять sha256 скачанного пакета (не надо так)
@@ -67,6 +80,9 @@ usage()
   -h, --help      это сообщение
 
 По умолчанию сервис запускается, только если `zapret2 check` прошёл чисто.
+По умолчанию скачивается список доменов и включается MODE_FILTER=hostlist.
+Если список скачать не удалось, режим остаётся none: hostlist с пустым списком
+означал бы, что обход молча не работает вовсе.
 USAGE
 }
 
@@ -78,6 +94,9 @@ for a in "$@"; do
 		--iface=*)    IFACE=${a#--iface=} ;;
 		--tag=*)      TAG=${a#--tag=} ;;
 		--ipk=*)      IPK=${a#--ipk=} ;;
+		--no-lists)   WANT_LISTS=0 ;;
+		--lists=*)    LIST_SCRIPT=${a#--lists=} ;;
+		--autohostlist) LIST_MODE=autohostlist ;;
 		--no-start)   START_MODE=never ;;
 		--force-start) START_MODE=always ;;
 		--no-verify)  VERIFY=0 ;;
@@ -205,6 +224,37 @@ fi
 
 [ -f "$CONFIG" ] || die "после установки нет конфига $CONFIG — установка не удалась"
 
+# --- правка конфига -----------------------------------------------------------
+
+# Активная (не закомментированная) строка переменной есть?
+config_has() { grep -q "^[[:space:]]*$1=" "$CONFIG"; }
+config_get() { sed -n "s/^[[:space:]]*$1=//p" "$CONFIG" | head -n1; }
+
+# Бэкап делаем один раз, перед первой правкой: иначе вторая правка затёрла бы
+# оригинал уже изменённым конфигом.
+config_backup()
+{
+	if [ ! -f "$CONFIG.bak" ]; then
+		cp "$CONFIG" "$CONFIG.bak"
+		msg "прежний конфиг сохранён в $CONFIG.bak"
+	fi
+}
+
+config_set()
+{
+	# $1 - имя переменной, $2 - значение
+	config_backup
+	if config_has "$1"; then
+		sed "s|^[[:space:]]*$1=.*|$1=$2|" "$CONFIG" >"$CONFIG.new"
+	elif grep -q "^#$1=" "$CONFIG"; then
+		sed "s|^#$1=.*|$1=$2|" "$CONFIG" >"$CONFIG.new"
+	else
+		{ cat "$CONFIG"; printf '\n%s=%s\n' "$1" "$2"; } >"$CONFIG.new"
+	fi
+	mv "$CONFIG.new" "$CONFIG"
+	msg "в конфиг вписано $1=$2"
+}
+
 # --- WAN-интерфейс ------------------------------------------------------------
 
 # Тот же разбор /proc/net/route, что и в самом пакете: строки с маской 00000000.
@@ -214,8 +264,8 @@ detect_iface()
 		"$ROUTE_FILE" 2>/dev/null | sort -u | xargs
 }
 
-if grep -q '^[[:space:]]*IFACE_WAN=' "$CONFIG"; then
-	msg "IFACE_WAN уже задан в конфиге, не трогаю: $(sed -n 's/^[[:space:]]*IFACE_WAN=//p' "$CONFIG" | head -n1)"
+if config_has IFACE_WAN; then
+	msg "IFACE_WAN уже задан в конфиге, не трогаю: $(config_get IFACE_WAN)"
 else
 	if [ -z "$IFACE" ]; then
 		IFACE=$(detect_iface)
@@ -229,16 +279,43 @@ else
 	else
 		msg "WAN-интерфейс задан ключом: $IFACE"
 	fi
+	config_set IFACE_WAN "$IFACE"
+fi
 
-	cp "$CONFIG" "$CONFIG.bak"
-	msg "прежний конфиг сохранён в $CONFIG.bak"
-	if grep -q '^#IFACE_WAN=' "$CONFIG"; then
-		sed "s|^#IFACE_WAN=.*|IFACE_WAN=$IFACE|" "$CONFIG" >"$CONFIG.new"
+# --- списки доменов -----------------------------------------------------------
+
+# Доменный список, который читает nfqws при MODE_FILTER=hostlist/autohostlist.
+# def.sh upstream кладёт его сюда, gz-вариант появляется при GZIP_LISTS=1.
+hostlist_present()
+{
+	[ -s "$HOSTLIST_DIR/zapret-hosts.txt.gz" ] || [ -s "$HOSTLIST_DIR/zapret-hosts.txt" ]
+}
+
+CURRENT_FILTER=$(config_get MODE_FILTER)
+[ -n "$CURRENT_FILTER" ] || CURRENT_FILTER=none
+
+if [ "$WANT_LISTS" = 0 ]; then
+	msg "загрузка списков пропущена (--no-lists), MODE_FILTER=$CURRENT_FILTER"
+elif [ "$CURRENT_FILTER" != none ]; then
+	msg "MODE_FILTER уже $CURRENT_FILTER — режим не трогаю, список обнови сам: zapret2-list"
+elif [ ! -x "$ZAPRET_LIST_BIN" ]; then
+	warn "нет $ZAPRET_LIST_BIN — список не скачать, остаётся MODE_FILTER=none"
+else
+	msg "качаю список доменов ($LIST_SCRIPT), это займёт время"
+	list_ok=1
+	"$ZAPRET_LIST_BIN" "$LIST_SCRIPT" || list_ok=0
+	if [ "$list_ok" = 1 ] && hostlist_present; then
+		# Порядок важен: режим переключаем ТОЛЬКО после того, как список реально
+		# лёг на диск. MODE_FILTER=hostlist с пустым списком означает, что nfqws
+		# не обрабатывает ничего, и обход молча перестаёт работать.
+		config_set MODE_FILTER "$LIST_MODE"
+		config_set GETLIST "$LIST_SCRIPT"
+		msg "список на месте, включён MODE_FILTER=$LIST_MODE"
 	else
-		{ cat "$CONFIG"; printf '\nIFACE_WAN=%s\n' "$IFACE"; } >"$CONFIG.new"
+		warn "список скачать не удалось — оставляю MODE_FILTER=none."
+		warn "Это не поломка: обход будет работать по всему трафику на портах из"
+		warn "конфига, просто дороже по CPU. Повторить позже: zapret2-list $LIST_SCRIPT"
 	fi
-	mv "$CONFIG.new" "$CONFIG"
-	msg "в конфиг вписано IFACE_WAN=$IFACE"
 fi
 
 # --- диагностика --------------------------------------------------------------
@@ -299,12 +376,17 @@ cat <<NEXT
 
 --- дальше ---
 1. Проверь на устройстве за роутером, открывается ли то, что не открывалось.
-2. Если нет — стратегия обхода не подошла твоему провайдеру. Подбери свою:
+2. Если нужного домена нет в списке — допиши руками:
+     vi /opt/etc/zapret2/ipset/zapret-hosts-user.txt   # по домену в строке
+     zapret2 restart
+   Обновить скачанный список позже:  zapret2-list
+3. Если не открывается вообще ничего из заблокированного — стратегия обхода не
+   подошла провайдеру. Подбери свою:
      ZAPRET_BASE=/opt/zapret2 ZAPRET_RW=/opt/etc/zapret2 sh /opt/zapret2/blockcheck2.sh
    и впиши результат в NFQWS2_OPT в $CONFIG, затем: zapret2 restart
-3. Через 10 минут проверь, что правила не слетели: zapret2 status
+4. Через 10 минут проверь, что правила не слетели: zapret2 status
    Число правил NFQUEUE должно остаться больше нуля — за это отвечает хук ndm.
-4. Откат, если что-то не так:  zapret2 stop   либо   opkg remove zapret2
+5. Откат, если что-то не так:  zapret2 stop   либо   opkg remove zapret2
 
 NEXT
 
