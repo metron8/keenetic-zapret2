@@ -1,0 +1,39 @@
+#!/bin/sh
+# Обёртка над скриптами получения списков из /opt/zapret2/ipset.
+# Нужна затем, что ipset/get_*.sh, запущенные напрямую, считают ZAPRET_RW равным
+# ZAPRET_BASE и полезут писать списки в /opt/zapret2/ipset (его затрёт обновление пакета).
+#
+#   zapret2-list                 # запустить GETLIST из конфига
+#   zapret2-list get_user.sh     # запустить конкретный скрипт
+#   zapret2-list --list          # показать доступные скрипты
+
+ZAPRET_BASE=/opt/zapret2
+ZAPRET_RW=/opt/etc/zapret2
+ZAPRET_CONFIG=$ZAPRET_RW/config
+export ZAPRET_BASE ZAPRET_RW ZAPRET_CONFIG
+PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+case "$1" in
+	--list|-l)
+		ls "$ZAPRET_BASE/ipset"/get_*.sh | xargs -n1 basename
+		exit 0
+		;;
+esac
+
+SCRIPT=$1
+if [ -z "$SCRIPT" ]; then
+	# shellcheck disable=SC1090
+	. "$ZAPRET_CONFIG"
+	SCRIPT=$GETLIST
+	[ -n "$SCRIPT" ] || {
+		echo "GETLIST не задан в $ZAPRET_CONFIG. Доступные скрипты:" >&2
+		ls "$ZAPRET_BASE/ipset"/get_*.sh | xargs -n1 basename >&2
+		exit 1
+	}
+fi
+
+[ -f "$ZAPRET_BASE/ipset/$SCRIPT" ] || { echo "нет $ZAPRET_BASE/ipset/$SCRIPT" >&2; exit 1; }
+
+mkdir -p "$ZAPRET_RW/ipset"
+exec sh "$ZAPRET_BASE/ipset/$SCRIPT"

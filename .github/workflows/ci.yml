@@ -1,0 +1,63 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: линт и тесты
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: версия shellcheck
+        run: shellcheck --version
+
+      - name: синтаксис всех шелл-скриптов
+        run: make check
+
+      - name: офлайн-тесты
+        run: tests/run.sh
+
+  build:
+    name: сборка ${{ matrix.arch }}
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [mipsel-3.4, aarch64-3.10]
+    steps:
+      - uses: actions/checkout@v4
+
+      # Тянет готовые бинарники из релиза upstream и проверяет их по sha256sum.txt
+      - name: собрать .ipk
+        run: make ipk ARCH=${{ matrix.arch }}
+
+      # Разбирает собранный пакет: control, права, conffiles, отсутствие исходников
+      # и сверка ELF-заголовка бинарников с заявленной архитектурой
+      - name: проверить .ipk
+        run: make inspect ARCH=${{ matrix.arch }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ipk-${{ matrix.arch }}
+          path: dist/*.ipk
+          if-no-files-found: error
+
+  config-drift:
+    name: сверка конфига с upstream
+    needs: test
+    runs-on: ubuntu-latest
+    # Информационная джоба: расхождение с config.default само по себе не ошибка,
+    # но его надо видеть, когда upstream выпускает новую версию.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - run: make check-config

@@ -1,0 +1,33 @@
+#!/bin/sh
+# Выполняется opkg перед удалением файлов.
+# Первым аргументом opkg передаёт "upgrade" при обновлении и "remove" при удалении.
+
+[ -n "$IPKG_INSTROOT" ] && exit 0
+
+# ZAPRET_ROOT_PREFIX и ZAPRET_RUNDIR переопределяются только тестами; в бою пусты.
+PREFIX=${ZAPRET_ROOT_PREFIX:-}
+INIT=$PREFIX/opt/etc/init.d/S99zapret2
+RESTART_FLAG=$PREFIX/opt/var/run/zapret2.upgrade-restart
+
+# Метку "сервис запущен" ищем там же, где её кладёт init-скрипт.
+statefile()
+{
+	local d
+	for d in ${ZAPRET_RUNDIR:-} /var/run /tmp; do
+		[ -f "$d/zapret2.started" ] && { echo "$d/zapret2.started"; return 0; }
+	done
+	return 1
+}
+
+# Метку автозапуска ставим только на обновлении — её подхватит postinst нового
+# пакета. На обычном remove она не нужна: иначе следующая чистая установка
+# стартанула бы сервис с ещё не настроенным конфигом.
+if [ "$1" = "upgrade" ] && statefile >/dev/null; then
+	mkdir -p "$PREFIX/opt/var/run"
+	: >"$RESTART_FLAG"
+fi
+
+# Снимаем правила и глушим демоны, пока файлы ещё на месте.
+[ -x "$INIT" ] && "$INIT" stop
+
+exit 0

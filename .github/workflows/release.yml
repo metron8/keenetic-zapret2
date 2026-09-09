@@ -1,0 +1,101 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: 'Тег zapret2, из которого собирать (например v1.0.5.1)'
+        required: true
+      pkg_revision:
+        description: 'Ревизия пакета'
+        required: false
+        default: '1'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: сборка ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [mipsel-3.4, aarch64-3.10]
+    steps:
+      - uses: actions/checkout@v4
+
+      # Тег репозитория имеет вид v<версия zapret2>-<ревизия пакета>, например
+      # v1.0.5.1-2 -> REF=v1.0.5.1, PKG_REVISION=2. Так версия пакета всегда
+      # однозначно сопоставляется с версией upstream.
+      - name: разобрать версию
+        id: ver
+        run: |
+          if [ -n "${{ github.event.inputs.upstream_ref }}" ]; then
+            ref='${{ github.event.inputs.upstream_ref }}'
+            rev='${{ github.event.inputs.pkg_revision }}'
+          else
+            tag='${{ github.ref_name }}'
+            tag=${tag#v}
+            ref="v${tag%-*}"
+            rev="${tag##*-}"
+            case "$tag" in
+              *-*) ;;
+              *) rev=1 ;;
+            esac
+          fi
+          echo "ref=$ref"  >>"$GITHUB_OUTPUT"
+          echo "rev=$rev"  >>"$GITHUB_OUTPUT"
+          echo "собираю zapret2 $ref, ревизия пакета $rev"
+
+      - name: тесты
+        run: make check && tests/run.sh
+
+      - name: собрать .ipk
+        run: make ipk ARCH=${{ matrix.arch }} REF=${{ steps.ver.outputs.ref }} PKG_REVISION=${{ steps.ver.outputs.rev }}
+
+      - name: проверить .ipk
+        run: make inspect ARCH=${{ matrix.arch }} REF=${{ steps.ver.outputs.ref }} PKG_REVISION=${{ steps.ver.outputs.rev }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ipk-${{ matrix.arch }}
+          path: dist/*.ipk
+          if-no-files-found: error
+
+  publish:
+    name: выложить релиз
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: art
+          pattern: ipk-*
+          merge-multiple: true
+
+      - name: контрольные суммы
+        run: |
+          cd art
+          ls -l
+          sha256sum ./*.ipk >sha256sum.txt
+          cat sha256sum.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          fail_on_unmatched_files: true
+          body: |
+            Пакет zapret2 для Keenetic (Entware).
+
+            Установка на роутере:
+            ```
+            opkg install /opt/tmp/zapret2_<версия>_<арх>.ipk
+            zapret2 check
+            ```
+            Архитектуру роутера показывает `opkg print-architecture`.
+          files: |
+            art/*.ipk
+            art/sha256sum.txt

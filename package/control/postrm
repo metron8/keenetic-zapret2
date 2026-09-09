@@ -1,0 +1,23 @@
+#!/bin/sh
+# Выполняется opkg после удаления файлов.
+# Первым аргументом opkg передаёт "upgrade" при обновлении и "remove" при удалении.
+
+[ -n "$IPKG_INSTROOT" ] && exit 0
+
+PREFIX=${ZAPRET_ROOT_PREFIX:-}
+RESTART_FLAG=$PREFIX/opt/var/run/zapret2.upgrade-restart
+
+# /opt/var/run переживает удаление пакета, поэтому метку автозапуска надо убрать
+# явно — иначе она бы дождалась следующей установки и стартанула сервис сама.
+[ "$1" = "upgrade" ] || rm -f "$RESTART_FLAG"
+
+for d in ${ZAPRET_RUNDIR:-} /var/run /tmp; do
+	rm -f "$d/zapret2.started" "$d/zapret2.reapply.pending"
+	rm -rf "$d/zapret2.lock"
+done
+
+# Конфиг и списки — conffiles, opkg решает их судьбу сам. Каталоги удаляем,
+# только если они опустели.
+rmdir "$PREFIX/opt/etc/zapret2/ipset" "$PREFIX/opt/etc/zapret2/custom.d" "$PREFIX/opt/etc/zapret2" 2>/dev/null
+
+exit 0

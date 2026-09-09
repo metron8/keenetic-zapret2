@@ -1,0 +1,41 @@
+#!/bin/sh
+# Выполняется opkg после распаковки файлов.
+
+# Оффлайн-установка в чужой корень: ничего на живой системе не делаем.
+[ -n "$IPKG_INSTROOT" ] && exit 0
+
+PREFIX=${ZAPRET_ROOT_PREFIX:-}
+INIT=$PREFIX/opt/etc/init.d/S99zapret2
+RESTART_FLAG=$PREFIX/opt/var/run/zapret2.upgrade-restart
+
+mkdir -p "$PREFIX/opt/tmp" "$PREFIX/opt/var/run" \
+         "$PREFIX/opt/etc/zapret2/ipset" "$PREFIX/opt/etc/zapret2/custom.d"
+chmod 755 "$INIT" "$PREFIX/opt/bin/zapret2" "$PREFIX/opt/bin/zapret2-list" \
+          "$PREFIX/opt/etc/ndm/netfilter.d/50-zapret2.sh" 2>/dev/null
+
+echo "zapret2: установлен в /opt/zapret2, конфиг — /opt/etc/zapret2/config"
+
+# Хуки ndm живут в /opt/etc/ndm — если Entware поставлен нестандартно, предупредим.
+[ -d "$PREFIX/opt/etc/ndm/netfilter.d" ] || {
+	echo "zapret2: ВНИМАНИЕ — нет каталога /opt/etc/ndm/netfilter.d."
+	echo "zapret2: без хука netfilter.d правила будут слетать при каждой пересборке firewall."
+}
+
+# Проверяем предпосылки, но не считаем их фатальными: пакет мог ставиться до
+# включения нужных компонентов прошивки.
+"$INIT" check || {
+	echo "zapret2: часть проверок не прошла — разбери вывод «zapret2 check» перед стартом."
+}
+
+if [ -f "$RESTART_FLAG" ]; then
+	rm -f "$RESTART_FLAG"
+	echo "zapret2: перезапускаю после обновления"
+	"$INIT" start
+else
+	echo "zapret2: правь /opt/etc/zapret2/config (как минимум IFACE_WAN и NFQWS2_OPT), затем:"
+	echo "zapret2:   zapret2 start     # запустить"
+	echo "zapret2:   zapret2 status    # проверить"
+	echo "zapret2: автозапуск при монтировании /opt уже включён (S99zapret2)."
+fi
+
+exit 0

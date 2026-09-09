@@ -1,0 +1,301 @@
+#!/bin/sh
+#
+# zapret2 — init-скрипт для Entware на Keenetic.
+# Вызывается rc.unslung при монтировании /opt (хук /opt/etc/ndm/fs.d/100-entware.sh),
+# а также вручную: /opt/etc/init.d/S99zapret2 <команда> либо просто `zapret2 <команда>`.
+#
+# Отличия от штатного sysv-скрипта zapret2:
+#   * конфиг и пользовательские файлы вынесены в /opt/etc/zapret2 (ZAPRET_RW),
+#     чтобы opkg-обновление /opt/zapret2 их не затирало;
+#   * есть команда reapply для хука /opt/etc/ndm/netfilter.d — Keenetic регулярно
+#     пересобирает netfilter, и правила zapret из него вычищаются;
+#   * есть команда check — диагностика предпосылок (модули ядра, iptables, offload).
+
+ENABLED=yes
+
+ZAPRET_BASE=${ZAPRET_BASE:-/opt/zapret2}
+ZAPRET_RW=${ZAPRET_RW:-/opt/etc/zapret2}
+ZAPRET_CONFIG=${ZAPRET_CONFIG:-$ZAPRET_RW/config}
+export ZAPRET_BASE ZAPRET_RW ZAPRET_CONFIG
+
+PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+# pid-файлы и метку "сервис запущен" держим в tmpfs: они не должны переживать перезагрузку.
+# ZAPRET_RUNDIR переопределяется только тестами; в бою он пуст.
+RUNDIR=${ZAPRET_RUNDIR:-/var/run}
+[ -d "$RUNDIR" ] && [ -w "$RUNDIR" ] || RUNDIR=/tmp
+STATEFILE="$RUNDIR/zapret2.started"
+LOCKDIR="$RUNDIR/zapret2.lock"
+PENDING="$RUNDIR/zapret2.reapply.pending"
+
+# Путь к самому себе: отложенная переустановка правил перезапускает скрипт как
+# отдельный процесс (иначе $$ в фоновом сабшелле — это pid уже умершего родителя).
+SELF=$0
+case "$SELF" in
+	/*) ;;
+	*) SELF="$(cd "$(dirname "$SELF")" && pwd)/$(basename "$SELF")" ;;
+esac
+
+# задержка коалесцирования для netfilter.d: ndm дёргает хук пачкой,
+# нет смысла переставлять правила на каждый вызов
+REAPPLY_DELAY=${REAPPLY_DELAY:-3}
+
+# сколько секунд ждать освобождения блокировки, прежде чем сдаться
+LOCK_WAIT=${ZAPRET_LOCK_WAIT:-30}
+
+log() { echo "zapret2: $*"; logger -t zapret2 -- "$*" 2>/dev/null; }
+die() { log "$*"; exit 1; }
+
+# --- блокировка (busybox-совместимая, без flock) ------------------------------
+
+lock_acquire()
+{
+	# $1 - сколько секунд ждать (по умолчанию LOCK_WAIT)
+	local wait=${1:-$LOCK_WAIT} pid
+	while ! mkdir "$LOCKDIR" 2>/dev/null; do
+		# Блокировку от умершего процесса снимаем, но всё равно уходим в общий
+		# sleep/таймаут ниже: иначе неудачный rm крутил бы цикл на 100% CPU.
+		pid=
+		[ -f "$LOCKDIR/pid" ] && read -r pid <"$LOCKDIR/pid" 2>/dev/null
+		if [ -n "$pid" ] && [ ! -d "/proc/$pid" ]; then
+			log "снимаю блокировку, оставшуюся от мёртвого процесса $pid"
+			rm -rf "$LOCKDIR"
+		fi
+		wait=$((wait - 1))
+		[ "$wait" -le 0 ] && return 1
+		sleep 1
+	done
+	echo $$ >"$LOCKDIR/pid"
+	return 0
+}
+lock_release() { rm -rf "$LOCKDIR"; }
+
+# --- загрузка окружения zapret ------------------------------------------------
+
+load_zapret()
+{
+	[ -f "$ZAPRET_CONFIG" ] || die "нет конфига $ZAPRET_CONFIG"
+	[ -f "$ZAPRET_BASE/init.d/sysv/functions" ] || die "нет $ZAPRET_BASE/init.d/sysv/functions — пакет установлен не полностью"
+	# shellcheck disable=SC1090
+	. "$ZAPRET_BASE/init.d/sysv/functions"
+	# functions выставляет CUSTOM_DIR=$ZAPRET_RW/init.d/sysv; нам удобнее плоский /opt/etc/zapret2/custom.d
+	CUSTOM_DIR="$ZAPRET_RW"
+	PIDDIR="$RUNDIR"
+}
+
+# --- команды ------------------------------------------------------------------
+
+do_start()
+{
+	[ "$ENABLED" = yes ] || { log "выключен (ENABLED=$ENABLED в $0)"; return 0; }
+	lock_acquire || die "не удалось взять блокировку"
+	load_zapret
+	zapret_run_daemons
+	[ "$INIT_APPLY_FW" != "1" ] || zapret_apply_firewall
+	# метку отложенной переустановки могло оставить прошлое падение воркера —
+	# иначе хук ndm молча перестал бы планировать переустановку правил
+	rm -f "$PENDING"
+	: >"$STATEFILE"
+	lock_release
+	log "запущен"
+}
+
+do_stop()
+{
+	lock_acquire || die "не удалось взять блокировку"
+	rm -f "$STATEFILE" "$PENDING"
+	load_zapret
+	[ "$INIT_APPLY_FW" != "1" ] || zapret_unapply_firewall
+	zapret_stop_daemons
+	lock_release
+	log "остановлен"
+}
+
+do_status()
+{
+	local rc=0 pidfile pid n=0
+	for pidfile in "$RUNDIR"/nfqws2_*.pid; do
+		[ -f "$pidfile" ] || continue
+		read -r pid <"$pidfile" 2>/dev/null
+		if [ -n "$pid" ] && [ -d "/proc/$pid" ]; then
+			echo "nfqws2 работает: pid $pid ($pidfile)"
+			n=$((n + 1))
+		else
+			echo "nfqws2 НЕ работает: протухший $pidfile"
+			rc=1
+		fi
+	done
+	[ "$n" = 0 ] && { echo "демоны nfqws2 не запущены"; rc=1; }
+
+	if [ -f "$STATEFILE" ]; then
+		echo "сервис помечен как запущенный ($STATEFILE)"
+	else
+		echo "сервис помечен как остановленный"
+		rc=1
+	fi
+
+	# сверяем, что правила реально стоят в netfilter — Keenetic их регулярно сносит
+	load_zapret
+	n=$(iptables-save -t mangle 2>/dev/null | grep -c -- "--queue-num $QNUM")
+	echo "правил NFQUEUE(queue-num $QNUM) в mangle: $n"
+	[ "$n" = 0 ] && [ -f "$STATEFILE" ] && { echo "ВНИМАНИЕ: правила отсутствуют, хотя сервис запущен — проверь хук netfilter.d"; rc=1; }
+	return $rc
+}
+
+# Планирование переустановки правил после того, как ndm пересобрал netfilter.
+# Хук /opt/etc/ndm/netfilter.d/50-zapret2.sh зовёт это пачкой, поэтому коалесцируем:
+# первая заявка ставит метку и планирует одного воркера, остальные уходят в no-op.
+do_reapply()
+{
+	local now ts
+	[ -f "$STATEFILE" ] || return 0
+
+	now=$(date +%s 2>/dev/null) || now=0
+	if [ -f "$PENDING" ]; then
+		ts=0
+		read -r ts <"$PENDING" 2>/dev/null
+		[ -n "$ts" ] || ts=0
+		# Свежая метка — воркер уже запланирован, выходим. Протухшая означает,
+		# что воркера убили: без этой ветки метка навсегда отключила бы хук.
+		if [ "$now" != 0 ] && [ $((now - ts)) -lt $((REAPPLY_DELAY + 60)) ]; then
+			return 0
+		fi
+		log "сбрасываю зависшую метку $PENDING"
+	fi
+	echo "$now" >"$PENDING"
+
+	# exec заменяет фоновый сабшелл настоящим процессом: только так $$ внутри
+	# lock_acquire будет собственным pid воркера, а не pid уже вышедшего родителя
+	( sleep "$REAPPLY_DELAY"; exec "$SELF" reapply-now ) >/dev/null 2>&1 &
+	return 0
+}
+
+# Собственно переустановка правил. Вызывается только воркером из do_reapply.
+do_reapply_now()
+{
+	rm -f "$PENDING"
+	# Сервис могли остановить (или снести пакет), пока воркер спал.
+	[ -f "$STATEFILE" ] || return 0
+	lock_acquire 60 || { log "переустановка правил пропущена: не удалось взять блокировку"; return 0; }
+	# Проверяем ещё раз уже под блокировкой: stop мог пройти между двумя строками.
+	[ -f "$STATEFILE" ] || { lock_release; return 0; }
+	load_zapret
+	zapret_unapply_firewall 2>/dev/null
+	zapret_apply_firewall
+	lock_release
+	log "правила переустановлены после пересборки netfilter"
+	return 0
+}
+
+do_check()
+{
+	local rc=0 v
+
+	echo "--- бинарники ---"
+	for v in nfq2/nfqws2 mdig/mdig ip2net/ip2net; do
+		if [ -x "$ZAPRET_BASE/$v" ]; then
+			echo "OK   $ZAPRET_BASE/$v"
+		else
+			echo "НЕТ  $ZAPRET_BASE/$v"; rc=1
+		fi
+	done
+	if echo 0.0.0.0 | "$ZAPRET_BASE/ip2net/ip2net" >/dev/null 2>&1; then
+		echo "OK   бинарники запускаются на этом CPU"
+	else
+		echo "СБОЙ ip2net не запустился — скорее всего пакет собран под другую архитектуру"; rc=1
+	fi
+
+	echo "--- ядро и netfilter ---"
+	if [ -e /proc/net/netfilter/nfnetlink_queue ]; then
+		echo "OK   nfnetlink_queue доступен"
+	else
+		echo "СБОЙ нет /proc/net/netfilter/nfnetlink_queue"
+		echo "     включи в веб-интерфейсе Keenetic компонент «Модули ядра подсистемы Netfilter»"
+		rc=1
+	fi
+	for v in iptables ip6tables ipset; do
+		if command -v "$v" >/dev/null 2>&1; then
+			echo "OK   $v: $(command -v $v)"
+		else
+			echo "нет  $v (нужен, если используешь соответствующий режим)"
+		fi
+	done
+	if iptables -t mangle -L POSTROUTING >/dev/null 2>&1; then
+		echo "OK   таблица mangle доступна"
+	else
+		echo "СБОЙ таблица mangle недоступна"; rc=1
+	fi
+
+	echo "--- пользователь для демонов ---"
+	load_zapret
+	echo "     WS_USER=$WS_USER, опция запуска: $USEROPT"
+	if id -u "$WS_USER" >/dev/null 2>&1; then
+		echo "OK   пользователь $WS_USER существует"
+	else
+		echo "ВНИМ пользователь $WS_USER не найден в /etc/passwd; entware ищет юзеров в /opt/etc/passwd,"
+		echo "     а статические бинарники zapret — в /etc/passwd. Выстави WS_USER=nobody в $ZAPRET_CONFIG"
+		rc=1
+	fi
+
+	echo "--- интерфейсы ---"
+	if [ -n "$IFACE_WAN" ]; then
+		echo "OK   IFACE_WAN=$IFACE_WAN (задан явно)"
+	else
+		v=$(sed -nre 's/^([^\t]+)\t00000000\t[0-9A-F]{8}\t[0-9A-F]{4}\t[0-9]+\t[0-9]+\t[0-9]+\t00000000.*$/\1/p' /proc/net/route | sort -u | xargs)
+		echo "ВНИМ IFACE_WAN не задан, автоопределение даст: ${v:-<ничего>}"
+		echo "     на Keenetic WAN-интерфейс может меняться — лучше прописать его явно в $ZAPRET_CONFIG"
+	fi
+
+	echo "--- хуки ndm ---"
+	if [ -x /opt/etc/ndm/netfilter.d/50-zapret2.sh ]; then
+		echo "OK   /opt/etc/ndm/netfilter.d/50-zapret2.sh на месте"
+	else
+		echo "СБОЙ нет хука netfilter.d — правила будут слетать каждые несколько минут"; rc=1
+	fi
+
+	echo "--- аппаратное ускорение ---"
+	echo "ВНИМ Keenetic с включённым аппаратным ускорением NAT может уводить трафик мимо netfilter."
+	echo "     Если обход не работает при корректных правилах — выключи ускорение и проверь снова."
+
+	return $rc
+}
+
+with_zapret()
+{
+	# $1 - имя функции из functions, остальное - аргументы
+	local f=$1; shift
+	lock_acquire || die "не удалось взять блокировку"
+	load_zapret
+	"$f" "$@"
+	local rc=$?
+	lock_release
+	return $rc
+}
+
+case "$1" in
+	start)                    do_start ;;
+	stop)                     do_stop ;;
+	restart)                  do_stop; do_start ;;
+	status)                   do_status ;;
+	check)                    do_check ;;
+	reapply)                  do_reapply ;;
+	reapply-now|reapply_now)  do_reapply_now ;;
+
+	start-fw|start_fw)        with_zapret zapret_apply_firewall ;;
+	stop-fw|stop_fw)          with_zapret zapret_unapply_firewall ;;
+	restart-fw|restart_fw)    with_zapret zapret_unapply_firewall; with_zapret zapret_apply_firewall ;;
+
+	start-daemons|start_daemons)     with_zapret zapret_run_daemons ;;
+	stop-daemons|stop_daemons)       with_zapret zapret_stop_daemons ;;
+	restart-daemons|restart_daemons) with_zapret zapret_stop_daemons; with_zapret zapret_run_daemons ;;
+
+	reload-ifsets|reload_ifsets)     with_zapret zapret_reload_ifsets ;;
+	list-ifsets|list_ifsets)         with_zapret zapret_list_ifsets ;;
+	list-table|list_table)           with_zapret zapret_list_table ;;
+
+	*)
+		echo "Usage: $0 {start|stop|restart|status|check|reapply|reapply-now|start-fw|stop-fw|restart-fw|start-daemons|stop-daemons|restart-daemons|reload-ifsets|list-ifsets|list-table}" >&2
+		exit 1
+		;;
+esac

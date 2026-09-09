@@ -1,0 +1,4 @@
+/opt/etc/zapret2/config
+/opt/etc/zapret2/custom.d/10-keenetic-udp-fix
+/opt/etc/zapret2/ipset/zapret-hosts-user.txt
+/opt/etc/zapret2/ipset/zapret-hosts-user-exclude.txt

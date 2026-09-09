@@ -1,0 +1,108 @@
+# Конфиг zapret2 для Keenetic (Entware).
+# Это conffile пакета: opkg не затирает его при обновлении.
+# Базовый вариант — config.default из zapret2, значения ниже подогнаны под Keenetic.
+# Полное описание переменных: /opt/zapret2/config.default и docs/manual.md upstream.
+
+# --- Keenetic-специфика -------------------------------------------------------
+
+# Демоны запускаются от юзера. entware держит своих юзеров в /opt/etc/passwd,
+# а статические бинарники zapret ищут их в /etc/passwd (r/o раздел прошивки).
+# Поэтому берём юзера, который заведомо есть в прошивке.
+WS_USER=nobody
+
+# У Keenetic нет nftables — фиксируем iptables, чтобы не тратить время на автодетект.
+FWTYPE=iptables
+
+# /tmp на роутере маленький, а списки распаковываются во временный каталог.
+TMPDIR=/opt/tmp
+
+# Списки хостов держим в r/w части, а не в /opt/zapret2/ipset, иначе обновление
+# пакета их снесёт. Каталог совпадает с IPSET_RW_DIR=$ZAPRET_RW/ipset из ipset/def.sh,
+# чтобы nfqws и скрипты получения списков смотрели в одно и то же место.
+HOSTLIST_BASE=/opt/etc/zapret2/ipset
+
+# ВАЖНО: пропиши свой WAN-интерфейс. На Keenetic он зависит от типа подключения:
+#   ppp0   - PPPoE
+#   eth3   - IPoE на большинстве моделей
+#   nwg0   - Wireguard, ovpn0 - OpenVPN
+# Без этого IFACE_WAN определяется по default route и может «уехать» при
+# переключении на резервный канал, а keenetic-udp-fix ниже станет неточным.
+#IFACE_WAN=ppp0
+#IFACE_LAN=br0
+#IFACE_WAN6="ipsec0 wireguard0"
+
+# --- демон nfqws2 -------------------------------------------------------------
+
+NFQWS2_ENABLE=1
+
+NFQWS2_PORTS_TCP=80,443
+NFQWS2_PORTS_UDP=443
+# PKT_OUT - connbytes dir original, PKT_IN - connbytes dir reply
+NFQWS2_TCP_PKT_OUT=20
+NFQWS2_TCP_PKT_IN=10
+NFQWS2_UDP_PKT_OUT=5
+NFQWS2_UDP_PKT_IN=3
+#NFQWS2_PORTS_TCP_KEEPALIVE=80
+#NFQWS2_PORTS_UDP_KEEPALIVE=
+
+# Стратегия обхода. Это стартовый набор из upstream config.default — под конкретного
+# провайдера его подбирают через blockcheck2.sh и вписывают сюда.
+NFQWS2_OPT="
+--filter-tcp=80 --filter-l7=http <HOSTLIST> --payload=http_req --lua-desync=fake:blob=fake_default_http:tcp_md5 --lua-desync=multisplit:pos=method+2 --new
+--filter-tcp=443 --filter-l7=tls <HOSTLIST> --payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:tcp_md5:tcp_seq=-10000 --lua-desync=multidisorder:pos=1,midsld --new
+--filter-udp=443 --filter-l7=quic <HOSTLIST_NOAUTO> --payload=quic_initial --lua-desync=fake:blob=fake_default_quic:repeats=6
+"
+
+# none,ipset,hostlist,autohostlist
+MODE_FILTER=none
+
+# --- firewall -----------------------------------------------------------------
+
+# Правила ставит/снимает init-скрипт. Их же переустанавливает хук
+# /opt/etc/ndm/netfilter.d/50-zapret2.sh после того, как ndm пересобрал netfilter.
+INIT_APPLY_FW=1
+
+# Аппаратное/программное ускорение на Keenetic управляется прошивкой, не нами.
+FLOWOFFLOAD=donttouch
+
+# Метки, которыми nfqws помечает свои пакеты, чтобы не зациклиться.
+# DESYNC_MARK используется в custom.d/10-keenetic-udp-fix.
+DESYNC_MARK=0x40000000
+DESYNC_MARK_POSTNAT=0x20000000
+#FILTER_MARK=0x10000000
+
+# Дропать icmp time exceeded для подделанных соединений.
+FILTER_TTL_EXPIRED_ICMP=1
+
+# IPv6 у большинства провайдеров в России нет; включай осознанно.
+DISABLE_IPV6=1
+#DISABLE_IPV4=1
+
+# --- списки и ipset -----------------------------------------------------------
+
+SET_MAXELEM=522288
+IPSET_OPT="hashsize 262144 maxelem $SET_MAXELEM"
+#IPSET_HOOK="/opt/etc/zapret2/ipset.hook"
+
+IP2NET_OPT4="--prefix-length=22-30 --v4-threshold=3/4"
+IP2NET_OPT6="--prefix-length=56-64 --v6-threshold=5"
+
+AUTOHOSTLIST_INCOMING_MAXSEQ=4096
+AUTOHOSTLIST_RETRANS_MAXSEQ=32768
+AUTOHOSTLIST_RETRANS_RESET=1
+AUTOHOSTLIST_RETRANS_THRESHOLD=3
+AUTOHOSTLIST_FAIL_THRESHOLD=3
+AUTOHOSTLIST_FAIL_TIME=60
+AUTOHOSTLIST_UDP_IN=1
+AUTOHOSTLIST_UDP_OUT=4
+AUTOHOSTLIST_DEBUGLOG=0
+
+MDIG_THREADS=30
+MDIG_EAGAIN=10
+MDIG_EAGAIN_DELAY=500
+
+GZIP_LISTS=1
+#LISTS_RELOAD=
+
+# Скрипт получения списков (ipset/get_*.sh). Закомментировано — MODE_FILTER=none.
+#GETLIST=get_user.sh
