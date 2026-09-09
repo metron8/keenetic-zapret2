@@ -13,7 +13,7 @@ fi
 #          dash/bash — 'local' есть везде, upstream zapret2 сам им пользуется
 EXCLUDE=SC1090,SC1091,SC2059,SC3043
 
-for f in "$ROOT"/install.sh "$ROOT"/scripts/*.sh \
+for f in "$ROOT"/install.sh "$ROOT"/uninstall.sh "$ROOT"/scripts/*.sh \
          "$ROOT"/tests/run.sh "$ROOT"/tests/lib.sh "$ROOT"/tests/t/*.sh \
          "$ROOT"/package/control/postinst "$ROOT"/package/control/prerm "$ROOT"/package/control/postrm \
          "$ROOT"/package/root/opt/etc/init.d/S99zapret2 \
