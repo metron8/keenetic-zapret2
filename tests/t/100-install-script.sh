@@ -54,8 +54,10 @@ case "$1" in
 		mkdir -p "$STUB_ROOT/opt/etc/zapret2/ipset" "$STUB_ROOT/opt/bin"
 		cp "$STUB_CONFIG_TMPL" "$STUB_ROOT/opt/etc/zapret2/config"
 		cp "$STUB_ZAPRET" "$STUB_ROOT/opt/bin/zapret2"
+		# zapret2-list — настоящий из пакета: в нём и живёт логика bootstrap
 		cp "$STUB_LIST" "$STUB_ROOT/opt/bin/zapret2-list"
 		chmod 755 "$STUB_ROOT/opt/bin/zapret2" "$STUB_ROOT/opt/bin/zapret2-list"
+		cp -r "$STUB_UPSTREAM" "$STUB_ROOT/opt/zapret2"
 		;;
 esac
 exit 0
@@ -79,19 +81,24 @@ if [ -f "$STUB_REL/$name" ]; then cp "$STUB_REL/$name" "$dest"; exit 0; fi
 exit 22
 CURL
 
-	# Стаб zapret2-list: по умолчанию «скачивает» список, при STUB_LIST_RC!=0
-	# падает, при STUB_LIST_EMPTY=1 отрабатывает успешно, но файла не создаёт —
-	# это разные способы провалиться, и оба должны оставить MODE_FILTER=none.
-	cat >"$SB/zapret2-list.stub" <<'LST'
+	# Фальшивое дерево upstream: только ipset/get_*.sh, которые зовёт zapret2-list.
+	# STUB_LIST_RC!=0 — скрипт упал; STUB_LIST_EMPTY=1 — отработал успешно, но
+	# файла не создал. Это разные способы провалиться, и оба обязаны оставить
+	# MODE_FILTER=none.
+	mkdir -p "$SB/upstream/ipset"
+	for g in get_reestr_resolvable_domains.sh get_antizapret_domains.sh get_user.sh; do
+		cat >"$SB/upstream/ipset/$g" <<'GET'
 #!/bin/sh
-echo "zapret2-list $*" >>"$STUB_LOG"
+echo "getlist ${0##*/}" >>"$STUB_LOG"
 if [ "${STUB_LIST_RC:-0}" != 0 ]; then exit "$STUB_LIST_RC"; fi
 if [ "${STUB_LIST_EMPTY:-0}" != 1 ]; then
-	mkdir -p "$STUB_ROOT/opt/etc/zapret2/ipset"
-	echo "example.com" | gzip -9c >"$STUB_ROOT/opt/etc/zapret2/ipset/zapret-hosts.txt.gz"
+	mkdir -p "$ZAPRET_RW/ipset"
+	echo "example.com" | gzip -9c >"$ZAPRET_RW/ipset/zapret-hosts.txt.gz"
 fi
 exit 0
-LST
+GET
+		chmod 755 "$SB/upstream/ipset/$g"
+	done
 
 	cat >"$SB/zapret2.stub" <<'ZAP'
 #!/bin/sh
@@ -103,7 +110,7 @@ esac
 exit 0
 ZAP
 
-	chmod 755 "$SB/bin/opkg" "$SB/bin/curl" "$SB/zapret2.stub" "$SB/zapret2-list.stub"
+	chmod 755 "$SB/bin/opkg" "$SB/bin/curl" "$SB/zapret2.stub"
 }
 
 # run_install <песочница> [ключи...] — код возврата остаётся в $?
@@ -113,7 +120,8 @@ run_install()
 	env PATH="$sb/bin:$PATH" \
 	    STUB_LOG="$sb/log" STUB_REL="$sb/rel" STUB_ROOT="$sb/root" \
 	    STUB_CONFIG_TMPL="$sb/config.tmpl" STUB_ZAPRET="$sb/zapret2.stub" \
-	    STUB_LIST="$sb/zapret2-list.stub" \
+	    STUB_LIST="$ROOT/package/root/opt/bin/zapret2-list" \
+	    STUB_UPSTREAM="$sb/upstream" \
 	    STUB_LIST_RC="${STUB_LIST_RC-0}" STUB_LIST_EMPTY="${STUB_LIST_EMPTY-0}" \
 	    STUB_ARCH="${STUB_ARCH-mipsel-3.4}" \
 	    STUB_INSTALLED="${STUB_INSTALLED-}" \
@@ -223,7 +231,7 @@ assert_ne 0 "$rc" "нет маршрута по умолчанию: скрипт
 
 setup lists-ok
 run_install "$SB"
-assert_grep "zapret2-list get_reestr_resolvable_domains.sh" "$SB/log" "список качается по умолчанию"
+assert_grep "getlist get_reestr_resolvable_domains.sh" "$SB/log" "список качается по умолчанию"
 assert_file "$SB/root/opt/etc/zapret2/ipset/zapret-hosts.txt.gz" "список лёг на диск"
 assert_grep '^MODE_FILTER=hostlist$' "$SB/root/opt/etc/zapret2/config" "после загрузки включается hostlist"
 assert_grep '^GETLIST=get_reestr_resolvable_domains.sh$' "$SB/root/opt/etc/zapret2/config" "GETLIST прописан для будущих обновлений"
@@ -241,7 +249,7 @@ assert_grep '^MODE_FILTER=none$' "$SB/root/opt/etc/zapret2/config" "скрипт
 
 setup lists-off
 run_install "$SB" --no-lists
-assert_nogrep "zapret2-list" "$SB/log" "--no-lists: список не качается"
+assert_nogrep "getlist" "$SB/log" "--no-lists: список не качается"
 assert_grep '^MODE_FILTER=none$' "$SB/root/opt/etc/zapret2/config" "--no-lists: режим не меняется"
 
 setup lists-auto
@@ -250,7 +258,7 @@ assert_grep '^MODE_FILTER=autohostlist$' "$SB/root/opt/etc/zapret2/config" "--au
 
 setup lists-custom
 run_install "$SB" --lists=get_antizapret_domains.sh
-assert_grep "zapret2-list get_antizapret_domains.sh" "$SB/log" "--lists выбирает другой скрипт"
+assert_grep "getlist get_antizapret_domains.sh" "$SB/log" "--lists выбирает другой скрипт"
 
 cat >"$TMP/cfg-filter-set" <<'CFG'
 WS_USER=nobody
@@ -259,15 +267,15 @@ MODE_FILTER=autohostlist
 CFG
 setup lists-preset "$TMP/cfg-filter-set"
 run_install "$SB"
-assert_nogrep "zapret2-list" "$SB/log" "уже настроенный MODE_FILTER: список не перекачивается"
+assert_nogrep "getlist" "$SB/log" "уже настроенный MODE_FILTER: список не перекачивается"
 assert_grep '^MODE_FILTER=autohostlist$' "$SB/root/opt/etc/zapret2/config" "уже настроенный MODE_FILTER не перезаписан"
 
 # Список должен лечь ДО старта: иначе демон поднимется с пустым фильтром.
 setup lists-order
 run_install "$SB"
-order=$(grep -n "zapret2-list\|zapret2 start" "$SB/log" | head -2 | cut -d: -f2- | tr '\n' '|')
+order=$(grep -n "getlist\|zapret2 start" "$SB/log" | head -2 | cut -d: -f2- | tr '\n' '|')
 case "$order" in
-	"zapret2-list "*"|zapret2 start"*) ok "список качается раньше старта сервиса" ;;
+	"getlist "*"|zapret2 start"*) ok "список качается раньше старта сервиса" ;;
 	*) bad "список качается раньше старта сервиса (порядок: $order)" ;;
 esac
 

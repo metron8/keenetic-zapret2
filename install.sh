@@ -51,7 +51,6 @@ LIST_SCRIPT=get_reestr_resolvable_domains.sh
 CONFIG=$PREFIX/opt/etc/zapret2/config
 ZAPRET_BIN=$PREFIX/opt/bin/zapret2
 ZAPRET_LIST_BIN=$PREFIX/opt/bin/zapret2-list
-HOSTLIST_DIR=$PREFIX/opt/etc/zapret2/ipset
 TMPDIR_R=$PREFIX/opt/tmp
 
 msg()  { echo "==> $*"; }
@@ -214,11 +213,14 @@ if [ "$SKIP_INSTALL" = 0 ]; then
 		fi
 	fi
 
+	# postinst пакета тоже умеет наполнять список, но у install.sh свои ключи
+	# (--lists/--autohostlist/--no-lists), поэтому там его глушим и делаем это
+	# ниже сами. Иначе список качался бы дважды.
 	msg "ставлю пакет"
 	if [ "$FORCE" = 1 ] && [ -n "$INSTALLED" ]; then
-		opkg install --force-reinstall "$IPK"
+		ZAPRET_NO_LISTS=1 opkg install --force-reinstall "$IPK"
 	else
-		opkg install "$IPK"
+		ZAPRET_NO_LISTS=1 opkg install "$IPK"
 	fi
 fi
 
@@ -284,38 +286,17 @@ fi
 
 # --- списки доменов -----------------------------------------------------------
 
-# Доменный список, который читает nfqws при MODE_FILTER=hostlist/autohostlist.
-# def.sh upstream кладёт его сюда, gz-вариант появляется при GZIP_LISTS=1.
-hostlist_present()
-{
-	[ -s "$HOSTLIST_DIR/zapret-hosts.txt.gz" ] || [ -s "$HOSTLIST_DIR/zapret-hosts.txt" ]
-}
-
-CURRENT_FILTER=$(config_get MODE_FILTER)
-[ -n "$CURRENT_FILTER" ] || CURRENT_FILTER=none
-
+# Саму загрузку и переключение режима делает `zapret2-list --bootstrap` из
+# пакета: там же это нужно postinst'у при ручной установке через opkg, и
+# дублировать логику в двух местах — верный способ развести их поведение.
 if [ "$WANT_LISTS" = 0 ]; then
-	msg "загрузка списков пропущена (--no-lists), MODE_FILTER=$CURRENT_FILTER"
-elif [ "$CURRENT_FILTER" != none ]; then
-	msg "MODE_FILTER уже $CURRENT_FILTER — режим не трогаю, список обнови сам: zapret2-list"
+	msg "загрузка списков пропущена (--no-lists), MODE_FILTER=$(config_get MODE_FILTER)"
 elif [ ! -x "$ZAPRET_LIST_BIN" ]; then
 	warn "нет $ZAPRET_LIST_BIN — список не скачать, остаётся MODE_FILTER=none"
 else
-	msg "качаю список доменов ($LIST_SCRIPT), это займёт время"
-	list_ok=1
-	"$ZAPRET_LIST_BIN" "$LIST_SCRIPT" || list_ok=0
-	if [ "$list_ok" = 1 ] && hostlist_present; then
-		# Порядок важен: режим переключаем ТОЛЬКО после того, как список реально
-		# лёг на диск. MODE_FILTER=hostlist с пустым списком означает, что nfqws
-		# не обрабатывает ничего, и обход молча перестаёт работать.
-		config_set MODE_FILTER "$LIST_MODE"
-		config_set GETLIST "$LIST_SCRIPT"
-		msg "список на месте, включён MODE_FILTER=$LIST_MODE"
-	else
-		warn "список скачать не удалось — оставляю MODE_FILTER=none."
-		warn "Это не поломка: обход будет работать по всему трафику на портах из"
-		warn "конфига, просто дороже по CPU. Повторить позже: zapret2-list $LIST_SCRIPT"
-	fi
+	ZAPRET_BASE="$PREFIX/opt/zapret2" ZAPRET_RW="$PREFIX/opt/etc/zapret2" \
+	ZAPRET_BOOTSTRAP_SCRIPT="$LIST_SCRIPT" ZAPRET_BOOTSTRAP_MODE="$LIST_MODE" \
+		"$ZAPRET_LIST_BIN" --bootstrap || true
 fi
 
 # --- диагностика --------------------------------------------------------------

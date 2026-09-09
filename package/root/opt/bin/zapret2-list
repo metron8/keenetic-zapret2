@@ -6,13 +6,23 @@
 #   zapret2-list                 # запустить GETLIST из конфига
 #   zapret2-list get_user.sh     # запустить конкретный скрипт
 #   zapret2-list --list          # показать доступные скрипты
+#   zapret2-list --bootstrap     # первичное наполнение списка + включение hostlist
 
-ZAPRET_BASE=/opt/zapret2
-ZAPRET_RW=/opt/etc/zapret2
-ZAPRET_CONFIG=$ZAPRET_RW/config
+# Пути переопределяются только тестами; в бою дефолтные — как и в S99zapret2.
+ZAPRET_BASE=${ZAPRET_BASE:-/opt/zapret2}
+ZAPRET_RW=${ZAPRET_RW:-/opt/etc/zapret2}
+ZAPRET_CONFIG=${ZAPRET_CONFIG:-$ZAPRET_RW/config}
 export ZAPRET_BASE ZAPRET_RW ZAPRET_CONFIG
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
+
+# Скрипт первичного наполнения по умолчанию. Выбран не случайно: он скачивает
+# доменный список ПЕРВЫМ делом, а getipban/create_ipset дёргает уже после.
+# У get_refilter_domains.sh и get_antizapret_domains.sh порядок обратный — при
+# неудаче ipset-части они выходят, не скачав ничего, а компонент IPset на
+# Keenetic не обязателен.
+BOOTSTRAP_SCRIPT=${ZAPRET_BOOTSTRAP_SCRIPT:-get_reestr_resolvable_domains.sh}
+BOOTSTRAP_MODE=${ZAPRET_BOOTSTRAP_MODE:-hostlist}
 
 # Печатает имена доступных ipset/get_*.sh, по одному в строке.
 list_scripts()
@@ -23,10 +33,83 @@ list_scripts()
 	done
 }
 
+# Доменный список, который читает nfqws при MODE_FILTER=hostlist/autohostlist.
+# def.sh upstream кладёт его сюда; вариант .gz появляется при GZIP_LISTS=1.
+hostlist_present()
+{
+	[ -s "$ZAPRET_RW/ipset/zapret-hosts.txt.gz" ] || [ -s "$ZAPRET_RW/ipset/zapret-hosts.txt" ]
+}
+
+config_get() { sed -n "s/^[[:space:]]*$1=//p" "$ZAPRET_CONFIG" 2>/dev/null | head -n1; }
+
+config_set()
+{
+	# $1 - имя переменной, $2 - значение
+	[ -f "$ZAPRET_CONFIG.bak" ] || cp "$ZAPRET_CONFIG" "$ZAPRET_CONFIG.bak"
+	if grep -q "^[[:space:]]*$1=" "$ZAPRET_CONFIG"; then
+		sed "s|^[[:space:]]*$1=.*|$1=$2|" "$ZAPRET_CONFIG" >"$ZAPRET_CONFIG.new"
+	elif grep -q "^#$1=" "$ZAPRET_CONFIG"; then
+		sed "s|^#$1=.*|$1=$2|" "$ZAPRET_CONFIG" >"$ZAPRET_CONFIG.new"
+	else
+		{ cat "$ZAPRET_CONFIG"; printf '\n%s=%s\n' "$1" "$2"; } >"$ZAPRET_CONFIG.new"
+	fi
+	mv "$ZAPRET_CONFIG.new" "$ZAPRET_CONFIG"
+}
+
+run_script()
+{
+	# $1 - имя скрипта из ipset/
+	[ -f "$ZAPRET_BASE/ipset/$1" ] || { echo "нет $ZAPRET_BASE/ipset/$1" >&2; return 1; }
+	mkdir -p "$ZAPRET_RW/ipset"
+	sh "$ZAPRET_BASE/ipset/$1"
+}
+
+# Первичное наполнение: скачать список и только ПОСЛЕ этого включить фильтрацию.
+# Порядок принципиален. Маркер <HOSTLIST> в NFQWS2_OPT разворачивается в
+# --hostlist=<файл> (см. common/list.sh upstream), и если файла нет, nfqws
+# получает фильтр, под который не подпадает ни один домен, — обход молча
+# перестаёт работать при живом сервисе и стоящих правилах. Поэтому при неудачной
+# загрузке режим остаётся none: обрабатывать весь трафик дороже по CPU, но оно
+# хотя бы работает.
+do_bootstrap()
+{
+	[ -f "$ZAPRET_CONFIG" ] || { echo "нет конфига $ZAPRET_CONFIG" >&2; return 1; }
+
+	_mf=$(config_get MODE_FILTER)
+	[ -n "$_mf" ] || _mf=none
+	if [ "$_mf" != none ]; then
+		echo "MODE_FILTER=$_mf уже настроен — список не трогаю. Обновить: zapret2-list"
+		return 0
+	fi
+
+	if hostlist_present; then
+		echo "список уже на месте, включаю MODE_FILTER=$BOOTSTRAP_MODE"
+	else
+		echo "качаю список доменов ($BOOTSTRAP_SCRIPT), это займёт время"
+		if ! run_script "$BOOTSTRAP_SCRIPT" || ! hostlist_present; then
+			echo "zapret2: список скачать не удалось — оставляю MODE_FILTER=none." >&2
+			echo "zapret2: это не поломка, обход будет работать по всему трафику на портах" >&2
+			echo "zapret2: из конфига, просто дороже по CPU." >&2
+			echo "zapret2: повторить позже: zapret2-list --bootstrap" >&2
+			return 1
+		fi
+	fi
+
+	config_set MODE_FILTER "$BOOTSTRAP_MODE"
+	config_set GETLIST "$BOOTSTRAP_SCRIPT"
+	echo "zapret2: список на месте, включён MODE_FILTER=$BOOTSTRAP_MODE"
+	return 0
+}
+
 case "$1" in
 	--list|-l)
 		list_scripts
 		exit 0
+		;;
+	--bootstrap)
+		[ -z "$2" ] || BOOTSTRAP_SCRIPT=$2
+		do_bootstrap
+		exit $?
 		;;
 esac
 
@@ -42,7 +125,4 @@ if [ -z "$SCRIPT" ]; then
 	}
 fi
 
-[ -f "$ZAPRET_BASE/ipset/$SCRIPT" ] || { echo "нет $ZAPRET_BASE/ipset/$SCRIPT" >&2; exit 1; }
-
-mkdir -p "$ZAPRET_RW/ipset"
-exec sh "$ZAPRET_BASE/ipset/$SCRIPT"
+run_script "$SCRIPT"

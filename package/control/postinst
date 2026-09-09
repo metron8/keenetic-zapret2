@@ -6,6 +6,7 @@
 
 PREFIX=${ZAPRET_ROOT_PREFIX:-}
 INIT=$PREFIX/opt/etc/init.d/S99zapret2
+LISTTOOL=$PREFIX/opt/bin/zapret2-list
 RESTART_FLAG=$PREFIX/opt/var/run/zapret2.upgrade-restart
 
 mkdir -p "$PREFIX/opt/tmp" "$PREFIX/opt/var/run" \
@@ -28,10 +29,23 @@ echo "zapret2: установлен в /opt/zapret2, конфиг — /opt/etc/z
 }
 
 if [ -f "$RESTART_FLAG" ]; then
+	# Обновление: конфиг и списки — conffiles и r/w часть, они на месте.
+	# Заново качать список не нужно, сервис просто поднимаем обратно.
 	rm -f "$RESTART_FLAG"
 	echo "zapret2: перезапускаю после обновления"
 	"$INIT" start
 else
+	# Чистая установка: наполняем список сразу, чтобы на роутере не пришлось
+	# ничего донастраивать. Загрузка не фатальна — при неудаче остаётся
+	# MODE_FILTER=none, и это рабочее состояние.
+	# Отключается: ZAPRET_NO_LISTS=1 opkg install ...
+	if [ "$ZAPRET_NO_LISTS" = 1 ]; then
+		echo "zapret2: загрузка списка пропущена (ZAPRET_NO_LISTS=1)"
+	elif [ -x "$LISTTOOL" ]; then
+		ZAPRET_BASE="$PREFIX/opt/zapret2" ZAPRET_RW="$PREFIX/opt/etc/zapret2" \
+			"$LISTTOOL" --bootstrap || true
+	fi
+
 	echo "zapret2: правь /opt/etc/zapret2/config (как минимум IFACE_WAN и NFQWS2_OPT), затем:"
 	echo "zapret2:   zapret2 start     # запустить"
 	echo "zapret2:   zapret2 status    # проверить"
