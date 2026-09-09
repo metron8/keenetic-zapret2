@@ -20,9 +20,13 @@ ok()   { echo "ok   $*"; }
 tar -C "$TMP" -xzf "$IPK" || die "внешний архив не распаковался (ожидается gzip-tar формата ipkg)"
 
 for f in debian-binary control.tar.gz data.tar.gz; do
-	[ -f "$TMP/$f" ] && ok "$f на месте" || fail "во внешнем архиве нет $f"
+	if [ -f "$TMP/$f" ]; then ok "$f на месте"; else fail "во внешнем архиве нет $f"; fi
 done
-[ "$(cat "$TMP/debian-binary" 2>/dev/null)" = "2.0" ] && ok "debian-binary = 2.0" || fail "debian-binary не 2.0"
+if [ "$(cat "$TMP/debian-binary" 2>/dev/null)" = "2.0" ]; then
+	ok "debian-binary = 2.0"
+else
+	fail "debian-binary не 2.0"
+fi
 
 mkdir -p "$TMP/c" "$TMP/d"
 tar -C "$TMP/c" -xzf "$TMP/control.tar.gz"
@@ -31,24 +35,31 @@ tar -C "$TMP/d" -xzf "$TMP/data.tar.gz"
 echo "--- control ---"
 cat "$TMP/c/control"
 for k in Package Version Architecture Description; do
-	grep -q "^$k:" "$TMP/c/control" && ok "поле $k есть" || fail "в control нет поля $k"
+	if grep -q "^$k:" "$TMP/c/control"; then ok "поле $k есть"; else fail "в control нет поля $k"; fi
 done
 if [ -n "$WANT_ARCH" ]; then
-	grep -q "^Architecture: $WANT_ARCH$" "$TMP/c/control" && ok "Architecture = $WANT_ARCH" ||
+	if grep -q "^Architecture: $WANT_ARCH$" "$TMP/c/control"; then
+		ok "Architecture = $WANT_ARCH"
+	else
 		fail "Architecture в control не равен $WANT_ARCH"
+	fi
 fi
 
 echo "--- maintainer-скрипты ---"
 for f in postinst prerm postrm; do
 	if [ -f "$TMP/c/$f" ]; then
-		[ -x "$TMP/c/$f" ] && ok "$f исполняемый" || fail "$f не исполняемый"
-		sh -n "$TMP/c/$f" && ok "$f синтаксически корректен" || fail "$f не парсится"
+		if [ -x "$TMP/c/$f" ]; then ok "$f исполняемый"; else fail "$f не исполняемый"; fi
+		if sh -n "$TMP/c/$f"; then ok "$f синтаксически корректен"; else fail "$f не парсится"; fi
 	fi
 done
 if [ -f "$TMP/c/conffiles" ]; then
 	while IFS= read -r cf; do
 		[ -n "$cf" ] || continue
-		[ -f "$TMP/d/.$cf" ] && ok "conffile $cf есть в data" || fail "conffile $cf объявлен, но его нет в data"
+		if [ -f "$TMP/d/.$cf" ]; then
+			ok "conffile $cf есть в data"
+		else
+			fail "conffile $cf объявлен, но его нет в data"
+		fi
 	done <"$TMP/c/conffiles"
 fi
 
@@ -61,18 +72,20 @@ for f in ./opt/etc/init.d/S99zapret2 ./opt/etc/ndm/netfilter.d/50-zapret2.sh \
 done
 for f in ./opt/etc/init.d/S99zapret2 ./opt/etc/ndm/netfilter.d/50-zapret2.sh ./opt/bin/zapret2 \
          ./opt/zapret2/nfq2/nfqws2 ./opt/zapret2/mdig/mdig ./opt/zapret2/ip2net/ip2net; do
-	[ -x "$TMP/d/$f" ] && ok "$f исполняемый" || fail "$f не исполняемый"
+	if [ -x "$TMP/d/$f" ]; then ok "$f исполняемый"; else fail "$f не исполняемый"; fi
 done
-sh -n "$TMP/d/./opt/etc/init.d/S99zapret2" && ok "init-скрипт парсится" || fail "init-скрипт не парсится"
-sh -n "$TMP/d/./opt/etc/zapret2/config" && ok "config парсится как shell" || fail "config не парсится"
+if sh -n "$TMP/d/./opt/etc/init.d/S99zapret2"; then ok "init-скрипт парсится"; else fail "init-скрипт не парсится"; fi
+if sh -n "$TMP/d/./opt/etc/zapret2/config"; then ok "config парсится как shell"; else fail "config не парсится"; fi
 
 # в data не должно быть исходников и хлама
 for junk in ./opt/zapret2/nfq2/nfqws.c ./opt/zapret2/Makefile ./opt/zapret2/docs ./opt/zapret2/.git; do
-	[ -e "$TMP/d/$junk" ] && fail "в пакет попал лишний $junk" || ok "нет лишнего $junk"
+	if [ -e "$TMP/d/$junk" ]; then fail "в пакет попал лишний $junk"; else ok "нет лишнего $junk"; fi
 done
 
 echo "--- архитектура бинарников ---"
 if [ -n "$WANT_ARCH" ]; then
+	# arch_elf печатает три поля через пробел — разбиение на слова здесь нужное
+	# shellcheck disable=SC2046
 	set -- $(arch_elf "$WANT_ARCH")
 	want_class=$1; want_data=$2; want_machine=$3
 	for exe in nfq2/nfqws2 mdig/mdig ip2net/ip2net; do
@@ -98,5 +111,9 @@ if command -v file >/dev/null 2>&1; then
 fi
 
 echo
-[ "$rc" = 0 ] && echo "ИТОГ: пакет выглядит корректно" || echo "ИТОГ: есть проблемы (см. СБОЙ выше)"
+if [ "$rc" = 0 ]; then
+	echo "ИТОГ: пакет выглядит корректно"
+else
+	echo "ИТОГ: есть проблемы (см. СБОЙ выше)"
+fi
 exit $rc

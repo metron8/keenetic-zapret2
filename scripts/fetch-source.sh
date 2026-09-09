@@ -8,7 +8,9 @@ set -e
 
 REF=$1
 DEST=$2
-[ -n "$REF" ] && [ -n "$DEST" ] || die "usage: fetch-source.sh <ref> <destdir>"
+if [ -z "$REF" ] || [ -z "$DEST" ]; then
+	die "usage: fetch-source.sh <ref> <destdir>"
+fi
 
 need git
 

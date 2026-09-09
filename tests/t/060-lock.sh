@@ -75,6 +75,8 @@ if command -v timeout >/dev/null 2>&1; then
 	) &
 	flapper=$!
 	t0=$(date +%s)
+	# тело для sh -c должно уехать неразвёрнутым
+	# shellcheck disable=SC2016
 	ZAPRET_LOCK_WAIT=3 timeout 25 sh -c '
 		env ZAPRET_BASE="$1/base" ZAPRET_RW="$1/rw" ZAPRET_CONFIG="$1/rw/config" \
 		    ZAPRET_RUNDIR="$1/run" ZAPRET_TEST_LOG="$1/log" ZAPRET_LOCK_WAIT=3 \

@@ -9,8 +9,9 @@ SRC=$1
 BIN=$2
 ARCH=$3
 OUT=$4
-[ -n "$SRC" ] && [ -n "$BIN" ] && [ -n "$ARCH" ] && [ -n "$OUT" ] ||
+if [ -z "$SRC" ] || [ -z "$BIN" ] || [ -z "$ARCH" ] || [ -z "$OUT" ]; then
 	die "usage: stage.sh <srcdir> <bindir> <arch> <outroot>"
+fi
 arch_check "$ARCH"
 [ -d "$SRC/common" ] || die "$SRC не похож на дерево zapret2"
 

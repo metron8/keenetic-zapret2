@@ -14,7 +14,8 @@
 
 INIT=${ZAPRET_INIT:-/opt/etc/init.d/S99zapret2}
 
-# ebtables нас не касается
+# ebtables нас не касается. $type/$table приходят из окружения от ndm.
+# shellcheck disable=SC2154
 [ "$type" = "ebtables" ] && exit 0
 
 # Сервис не запущен — переставлять нечего. Метку ищем там же, где её кладёт

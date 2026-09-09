@@ -1,6 +1,9 @@
 # shellcheck shell=sh
 # Общие определения для сборочных скриптов пакета zapret2 под Keenetic (Entware).
 # Подключается всеми scripts/*.sh, самостоятельно не запускается.
+#
+# Переменные ниже потребляют подключающие скрипты, а не сама библиотека.
+# shellcheck disable=SC2034
 
 PKG_NAME=zapret2
 PKG_SECTION=net

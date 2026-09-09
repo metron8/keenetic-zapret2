@@ -9,7 +9,9 @@ set -e
 REF=$1
 ARCH=$2
 DEST=$3
-[ -n "$REF" ] && [ -n "$ARCH" ] && [ -n "$DEST" ] || die "usage: fetch-binaries.sh <ref> <arch> <destdir>"
+if [ -z "$REF" ] || [ -z "$ARCH" ] || [ -z "$DEST" ]; then
+	die "usage: fetch-binaries.sh <ref> <arch> <destdir>"
+fi
 arch_check "$ARCH"
 
 need tar sha256sum
@@ -39,7 +41,7 @@ SRC="$TMP/$PKG_NAME-$REF/binaries/$BINDIR"
 
 if [ -f "$TMP/sha256sum.txt" ]; then
 	msg "сверяю контрольные суммы"
-	( cd "$TMP" && grep "$PKG_NAME-$REF/binaries/$BINDIR/" sha256sum.txt >want.txt || true )
+	grep "$PKG_NAME-$REF/binaries/$BINDIR/" "$TMP/sha256sum.txt" >"$TMP/want.txt" || true
 	[ -s "$TMP/want.txt" ] || die "в sha256sum.txt нет записей для binaries/$BINDIR"
 	( cd "$TMP" && sha256sum -c want.txt ) || die "контрольные суммы бинарников не сошлись"
 fi

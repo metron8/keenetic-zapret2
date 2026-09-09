@@ -52,7 +52,7 @@ die() { log "$*"; exit 1; }
 lock_acquire()
 {
 	# $1 - сколько секунд ждать (по умолчанию LOCK_WAIT)
-	local wait=${1:-$LOCK_WAIT} pid
+	local wait="${1:-$LOCK_WAIT}" pid
 	while ! mkdir "$LOCKDIR" 2>/dev/null; do
 		# Блокировку от умершего процесса снимаем, но всё равно уходим в общий
 		# sleep/таймаут ниже: иначе неудачный rm крутил бы цикл на 100% CPU.
@@ -80,7 +80,10 @@ load_zapret()
 	# shellcheck disable=SC1090
 	. "$ZAPRET_BASE/init.d/sysv/functions"
 	# functions выставляет CUSTOM_DIR=$ZAPRET_RW/init.d/sysv; нам удобнее плоский /opt/etc/zapret2/custom.d
+	# CUSTOM_DIR и PIDDIR читает подключённый выше upstream functions, не мы
+	# shellcheck disable=SC2034
 	CUSTOM_DIR="$ZAPRET_RW"
+	# shellcheck disable=SC2034
 	PIDDIR="$RUNDIR"
 }
 
@@ -264,7 +267,7 @@ do_check()
 with_zapret()
 {
 	# $1 - имя функции из functions, остальное - аргументы
-	local f=$1; shift
+	local f="$1"; shift
 	lock_acquire || die "не удалось взять блокировку"
 	load_zapret
 	"$f" "$@"

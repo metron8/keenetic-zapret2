@@ -42,6 +42,8 @@ assert_grep "DESYNC_MARK" "$UDPFIX" "udp-фикс отбирает пакеты 
 assert_grep "zapret_custom_firewall" "$UDPFIX" "udp-фикс объявляет хук, который зовёт custom_runner"
 
 # custom.d должен лежать там, где init-скрипт выставляет CUSTOM_DIR
+# это grep-шаблон, $ZAPRET_RW тут не должен разворачиваться
+# shellcheck disable=SC2016
 assert_grep 'CUSTOM_DIR="\$ZAPRET_RW"' "$INIT" "CUSTOM_DIR указывает на ZAPRET_RW (то есть ZAPRET_RW/custom.d)"
 assert_file "$ROOT/package/root/opt/etc/zapret2/custom.d/10-keenetic-udp-fix" "udp-фикс лежит в custom.d"
 

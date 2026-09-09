@@ -13,7 +13,9 @@ set -e
 SRC=$1
 ARCH=$2
 DEST=$3
-[ -n "$SRC" ] && [ -n "$ARCH" ] && [ -n "$DEST" ] || die "usage: build-binaries.sh <srcdir> <arch> <destdir>"
+if [ -z "$SRC" ] || [ -z "$ARCH" ] || [ -z "$DEST" ]; then
+	die "usage: build-binaries.sh <srcdir> <arch> <destdir>"
+fi
 arch_check "$ARCH"
 [ -d "$SRC/nfq2" ] || die "$SRC не похож на дерево zapret2 (нет nfq2/)"
 
@@ -90,7 +92,7 @@ LLIB="-L$DEPS/lib -lluajit-$LUAJIT_LUAVER"
 build_autotools_dep()
 {
 	# $1 - имя, $2 - версия, $3 - url
-	local name=$1 ver=$2 url=$3
+	local name="$1" ver="$2" url="$3"
 	if [ -f "$DEPS/lib/pkgconfig/$name.pc" ]; then
 		msg "$name уже собран, пропускаю"
 		return 0

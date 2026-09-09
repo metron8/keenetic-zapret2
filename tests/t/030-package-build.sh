@@ -16,16 +16,18 @@ for arch in mipsel-3.4 aarch64-3.10; do
 	# фикстура должна быть валидной: сверяем её же нашим парсером ELF
 	# shellcheck disable=SC1091
 	. "$ROOT/scripts/lib.sh"
+	# arch_elf печатает три поля через пробел — разбиение на слова здесь нужное
+	# shellcheck disable=SC2046
 	set -- $(arch_elf "$arch")
 	assert_eq "$1" "$(elf_byte "$bin/nfqws2" 4)"  "$arch: EI_CLASS у фикстуры"
 	assert_eq "$2" "$(elf_byte "$bin/nfqws2" 5)"  "$arch: EI_DATA у фикстуры"
 	assert_eq "$3" "$(elf_machine "$bin/nfqws2")" "$arch: e_machine у фикстуры"
 
-	root="$TMP/root-$arch"
-	assert_status 0 sh "$ROOT/scripts/stage.sh" "$TMP/src" "$bin" "$arch" "$root"
+	pkgroot="$TMP/root-$arch"
+	assert_status 0 sh "$ROOT/scripts/stage.sh" "$TMP/src" "$bin" "$arch" "$pkgroot"
 
 	ipk="$TMP/out-$arch.ipk"
-	assert_status 0 sh "$ROOT/scripts/mkipk.sh" "$root" "$arch" v9.9.9 "$ipk"
+	assert_status 0 sh "$ROOT/scripts/mkipk.sh" "$pkgroot" "$arch" v9.9.9 "$ipk"
 	assert_file "$ipk" "$arch: .ipk создан"
 
 	# главная проверка: инспектор должен принять пакет своей архитектуры
@@ -80,9 +82,9 @@ done
 
 # сборка без blockcheck2
 bin="$TMP/bin-mipsel-3.4"
-root="$TMP/root-nobc"
-INCLUDE_BLOCKCHECK=0 sh "$ROOT/scripts/stage.sh" "$TMP/src" "$bin" mipsel-3.4 "$root" >/dev/null 2>&1
-assert_nofile "$root/opt/zapret2/blockcheck2.sh" "INCLUDE_BLOCKCHECK=0 выкидывает blockcheck2"
-assert_file   "$root/opt/zapret2/nfq2/nfqws2"    "INCLUDE_BLOCKCHECK=0 не ломает остальное"
+pkgroot="$TMP/root-nobc"
+INCLUDE_BLOCKCHECK=0 sh "$ROOT/scripts/stage.sh" "$TMP/src" "$bin" mipsel-3.4 "$pkgroot" >/dev/null 2>&1
+assert_nofile "$pkgroot/opt/zapret2/blockcheck2.sh" "INCLUDE_BLOCKCHECK=0 выкидывает blockcheck2"
+assert_file   "$pkgroot/opt/zapret2/nfq2/nfqws2"    "INCLUDE_BLOCKCHECK=0 не ломает остальное"
 
 finish

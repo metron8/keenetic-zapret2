@@ -12,9 +12,9 @@ for f in "$ROOT"/scripts/*.sh \
          "$ROOT"/package/root/opt/etc/zapret2/custom.d/*; do
 	[ -f "$f" ] || continue
 	if sh -n "$f" 2>/dev/null; then
-		ok "парсится: ${f#$ROOT/}"
+		ok "парсится: ${f#"$ROOT"/}"
 	else
-		bad "не парсится: ${f#$ROOT/}"
+		bad "не парсится: ${f#"$ROOT"/}"
 	fi
 done
 

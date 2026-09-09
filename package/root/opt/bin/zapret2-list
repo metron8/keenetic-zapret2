@@ -14,9 +14,18 @@ export ZAPRET_BASE ZAPRET_RW ZAPRET_CONFIG
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
+# Печатает имена доступных ipset/get_*.sh, по одному в строке.
+list_scripts()
+{
+	for _s in "$ZAPRET_BASE/ipset"/get_*.sh; do
+		[ -f "$_s" ] || continue
+		echo "${_s##*/}"
+	done
+}
+
 case "$1" in
 	--list|-l)
-		ls "$ZAPRET_BASE/ipset"/get_*.sh | xargs -n1 basename
+		list_scripts
 		exit 0
 		;;
 esac
@@ -28,7 +37,7 @@ if [ -z "$SCRIPT" ]; then
 	SCRIPT=$GETLIST
 	[ -n "$SCRIPT" ] || {
 		echo "GETLIST не задан в $ZAPRET_CONFIG. Доступные скрипты:" >&2
-		ls "$ZAPRET_BASE/ipset"/get_*.sh | xargs -n1 basename >&2
+		list_scripts >&2
 		exit 1
 	}
 fi

@@ -10,8 +10,9 @@ ROOT=$1
 ARCH=$2
 REF=$3
 OUTFILE=$4
-[ -n "$ROOT" ] && [ -n "$ARCH" ] && [ -n "$REF" ] && [ -n "$OUTFILE" ] ||
+if [ -z "$ROOT" ] || [ -z "$ARCH" ] || [ -z "$REF" ] || [ -z "$OUTFILE" ]; then
 	die "usage: mkipk.sh <dataroot> <arch> <ref> <outfile>"
+fi
 arch_check "$ARCH"
 [ -d "$ROOT/opt" ] || die "$ROOT не похож на дерево пакета (нет opt/)"
 
@@ -60,12 +61,16 @@ if tar --help 2>&1 | grep -q -- --mtime; then
 	TAROPT="$TAROPT --mtime=@$SDE"
 fi
 
-( cd "$TMP/control" && tar $TAROPT -czf "$TMP/control.tar.gz" ./* )
-( cd "$ROOT"        && tar $TAROPT -czf "$TMP/data.tar.gz" ./* )
+# TAROPT разбивается на слова намеренно: это набор опций, а не одно значение
+# shellcheck disable=SC2086
+tar_repro() { tar $TAROPT "$@"; }
+
+( cd "$TMP/control" && tar_repro -czf "$TMP/control.tar.gz" ./* )
+( cd "$ROOT"        && tar_repro -czf "$TMP/data.tar.gz" ./* )
 echo "2.0" >"$TMP/debian-binary"
 
 mkdir -p "$(dirname "$OUTFILE")"
 OUTFILE=$(cd "$(dirname "$OUTFILE")" && pwd)/$(basename "$OUTFILE")
-( cd "$TMP" && tar $TAROPT -czf "$OUTFILE" ./debian-binary ./data.tar.gz ./control.tar.gz )
+( cd "$TMP" && tar_repro -czf "$OUTFILE" ./debian-binary ./data.tar.gz ./control.tar.gz )
 
 msg "готово: $OUTFILE ($(du -h "$OUTFILE" | cut -f1))"
