@@ -7,6 +7,7 @@
 #   zapret2-list get_user.sh     # запустить конкретный скрипт
 #   zapret2-list --list          # показать доступные скрипты
 #   zapret2-list --bootstrap     # первичное наполнение списка + включение фильтрации
+#   zapret2-list --cron on|off   # автообновление списка через cron
 
 # Пути переопределяются только тестами; в бою дефолтные — как и в S99zapret2.
 ZAPRET_BASE=${ZAPRET_BASE:-/opt/zapret2}
@@ -23,6 +24,17 @@ export PATH
 # Keenetic не обязателен.
 BOOTSTRAP_SCRIPT=${ZAPRET_BOOTSTRAP_SCRIPT:-get_reestr_resolvable_domains.sh}
 BOOTSTRAP_MODE=${ZAPRET_BOOTSTRAP_MODE:-autohostlist}
+
+# Автообновление списка. Entware держит расписания в /opt/etc/crontabs/root —
+# файл общий, туда пишут и другие пакеты, и сам пользователь. Поэтому свою
+# строку помечаем и снимаем точечно, а файл целиком не трогаем.
+CRONTAB=${ZAPRET_CRONTAB:-/opt/etc/crontabs/root}
+CRON_CMD=${ZAPRET_CRON_CMD:-/opt/bin/zapret2-list}
+CRON_MARK='# zapret2-list: автообновление списка'
+# Раз в двое суток, ночью. Оговорка про */2: cron считает дни месяца, поэтому
+# на стыке месяцев интервал может оказаться суточным. Для обновления списка
+# это несущественно.
+CRON_SCHEDULE=${ZAPRET_CRON_SCHEDULE:-'17 4 */2 * *'}
 
 # Печатает имена доступных ipset/get_*.sh, по одному в строке.
 list_scripts()
@@ -102,10 +114,51 @@ do_bootstrap()
 	config_set MODE_FILTER "$BOOTSTRAP_MODE"
 	config_set GETLIST "$BOOTSTRAP_SCRIPT"
 	echo "zapret2: список на месте, включён MODE_FILTER=$BOOTSTRAP_MODE"
+	# GETLIST теперь задан, значит `zapret2-list` без аргументов знает, что качать,
+	# и расписание имеет смысл. До этого момента включать его было бы нечем.
+	cron_on
 	return 0
 }
 
+# Снимает нашу строку, чужие не трогает. Идемпотентно.
+cron_off()
+{
+	[ -f "$CRONTAB" ] || return 0
+	grep -v "$CRON_MARK" "$CRONTAB" >"$CRONTAB.new" 2>/dev/null || true
+	mv "$CRONTAB.new" "$CRONTAB"
+}
+
+cron_on()
+{
+	mkdir -p "${CRONTAB%/*}" 2>/dev/null || true
+	[ -f "$CRONTAB" ] || : >"$CRONTAB"
+	# Сначала снимаем прежнюю: иначе повторный вызов наплодил бы дубли.
+	cron_off
+	echo "$CRON_SCHEDULE $CRON_CMD >/dev/null 2>&1 $CRON_MARK" >>"$CRONTAB"
+	if command -v crond >/dev/null 2>&1 || command -v cron >/dev/null 2>&1; then
+		echo "zapret2: автообновление списка включено ($CRON_SCHEDULE)"
+	else
+		echo "zapret2: строка в $CRONTAB добавлена, но демон cron не найден." >&2
+		echo "zapret2: поставь его — opkg install cron — иначе расписание не сработает." >&2
+	fi
+}
+
 case "$1" in
+	--cron)
+		case "$2" in
+			on)  cron_on ;;
+			off) cron_off; echo "zapret2: автообновление списка выключено" ;;
+			status|"")
+				if [ -f "$CRONTAB" ] && grep -q "$CRON_MARK" "$CRONTAB"; then
+					grep "$CRON_MARK" "$CRONTAB"
+				else
+					echo "автообновление списка выключено"
+				fi
+				;;
+			*) echo "usage: zapret2-list --cron on|off|status" >&2; exit 1 ;;
+		esac
+		exit 0
+		;;
 	--list|-l)
 		list_scripts
 		exit 0

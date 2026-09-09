@@ -45,6 +45,7 @@ list_run()
 	    STUB_LIST_RC="${STUB_LIST_RC-0}" STUB_LIST_EMPTY="${STUB_LIST_EMPTY-0}" \
 	    ZAPRET_BOOTSTRAP_SCRIPT="${ZAPRET_BOOTSTRAP_SCRIPT-get_reestr_resolvable_domains.sh}" \
 	    ZAPRET_BOOTSTRAP_MODE="${ZAPRET_BOOTSTRAP_MODE-}" \
+	    ZAPRET_CRONTAB="$sb/crontab" ZAPRET_CRON_CMD=/opt/bin/zapret2-list \
 	    sh "$LISTTOOL" "$@" >"$sb/out" 2>&1
 }
 
@@ -125,6 +126,47 @@ list_run "$SB" && rc=0 || rc=$?
 assert_ne 0 "$rc" "без GETLIST и без аргумента — ошибка"
 assert_grep "GETLIST" "$SB/out" "подсказано, что задать GETLIST"
 
+# --- автообновление списка через cron -----------------------------------------
+
+setup cron-on
+list_run "$SB" --bootstrap
+assert_file "$SB/crontab" "bootstrap создал crontab"
+assert_grep "zapret2-list" "$SB/crontab" "после bootstrap расписание добавлено"
+assert_grep '\*/2' "$SB/crontab" "расписание раз в двое суток"
+
+# Провал загрузки не должен оставлять расписание: обновлять нечего, GETLIST не
+# задан, и cron просто ругался бы раз в двое суток.
+setup cron-not-on-fail
+STUB_LIST_RC=2 list_run "$SB" --bootstrap || true
+assert_nogrep "zapret2-list" "$SB/crontab" "провал загрузки: расписание не добавлено"
+
+setup cron-idempotent
+list_run "$SB" --bootstrap
+list_run "$SB" --cron on
+list_run "$SB" --cron on
+assert_count 1 "zapret2-list" "$SB/crontab" "повторные вызовы не плодят дубли"
+
+# Файл общий: чужие строки трогать нельзя.
+setup cron-foreign
+mkdir -p "$SB"
+printf '0 5 * * * /opt/bin/чужой-скрипт\n' >"$SB/crontab"
+list_run "$SB" --bootstrap
+assert_grep 'чужой-скрипт' "$SB/crontab" "чужая строка на месте после включения"
+list_run "$SB" --cron off
+assert_grep 'чужой-скрипт' "$SB/crontab" "чужая строка на месте после выключения"
+assert_nogrep "zapret2-list" "$SB/crontab" "наша строка снята"
+
+setup cron-status
+list_run "$SB" --cron status
+assert_grep "выключено" "$SB/out" "status: выключено, пока не включали"
+list_run "$SB" --bootstrap
+list_run "$SB" --cron status
+assert_grep "zapret2-list" "$SB/out" "status: показывает строку расписания"
+
+setup cron-off-missing
+list_run "$SB" --cron off && rc=0 || rc=$?
+assert_eq 0 "$rc" "выключение без crontab-файла не ошибка"
+
 # --- postinst зовёт bootstrap при ручной установке ----------------------------
 
 # Песочница под maintainer-скрипт: ему нужны init, zapret2-list и дерево upstream.
@@ -198,5 +240,29 @@ setup_postinst pi-instroot
 env IPKG_INSTROOT="$SB/root" ZAPRET_ROOT_PREFIX="$SB/root" STUB_LOG="$SB/log" \
 	sh "$ROOT/package/control/postinst" >"$SB/out" 2>&1
 assert_nogrep "getlist" "$SB/log" "postinst: с IPKG_INSTROOT ничего не качает"
+
+# --- prerm снимает расписание при удалении ------------------------------------
+
+prerm_run()
+{
+	sb=$1; shift
+	env ZAPRET_ROOT_PREFIX="$sb/root" STUB_LOG="$sb/log" \
+	    sh "$ROOT/package/control/prerm" "$@" >"$sb/out" 2>&1
+}
+
+setup_postinst pr-remove
+mkdir -p "$SB/root/opt/etc/crontabs"
+printf '0 5 * * * /opt/bin/чужой-скрипт\n17 4 */2 * * /opt/bin/zapret2-list >/dev/null 2>&1 # zapret2-list: автообновление списка\n' >"$SB/root/opt/etc/crontabs/root"
+prerm_run "$SB" remove
+assert_nogrep "zapret2-list" "$SB/root/opt/etc/crontabs/root" "remove: наша строка снята"
+assert_grep 'чужой-скрипт' "$SB/root/opt/etc/crontabs/root" "remove: чужая строка не тронута"
+
+# На обновлении строка должна остаться: postinst нового пакета её не вернёт,
+# потому что bootstrap там только для чистой установки.
+setup_postinst pr-upgrade
+mkdir -p "$SB/root/opt/etc/crontabs"
+printf '17 4 */2 * * /opt/bin/zapret2-list >/dev/null 2>&1 # zapret2-list: автообновление списка\n' >"$SB/root/opt/etc/crontabs/root"
+prerm_run "$SB" upgrade
+assert_grep "zapret2-list" "$SB/root/opt/etc/crontabs/root" "upgrade: расписание переживает обновление"
 
 finish

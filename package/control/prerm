@@ -7,6 +7,7 @@
 # ZAPRET_ROOT_PREFIX и ZAPRET_RUNDIR переопределяются только тестами; в бою пусты.
 PREFIX=${ZAPRET_ROOT_PREFIX:-}
 INIT=$PREFIX/opt/etc/init.d/S99zapret2
+LISTTOOL=$PREFIX/opt/bin/zapret2-list
 RESTART_FLAG=$PREFIX/opt/var/run/zapret2.upgrade-restart
 
 # Метку "сервис запущен" ищем там же, где её кладёт init-скрипт.
@@ -25,6 +26,14 @@ statefile()
 if [ "$1" = "upgrade" ] && statefile >/dev/null; then
 	mkdir -p "$PREFIX/opt/var/run"
 	: >"$RESTART_FLAG"
+fi
+
+# Строку автообновления в /opt/etc/crontabs/root снимаем только на remove: на
+# обновлении она должна пережить замену файлов, иначе расписание потерялось бы
+# (postinst нового пакета его не восстановит — bootstrap там только для чистой
+# установки). Делаем это, пока zapret2-list ещё на месте.
+if [ "$1" != "upgrade" ] && [ -x "$LISTTOOL" ]; then
+	ZAPRET_CRONTAB="$PREFIX/opt/etc/crontabs/root" "$LISTTOOL" --cron off >/dev/null 2>&1 || true
 fi
 
 # Снимаем правила и глушим демоны, пока файлы ещё на месте.

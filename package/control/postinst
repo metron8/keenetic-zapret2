@@ -43,6 +43,7 @@ else
 		echo "zapret2: загрузка списка пропущена (ZAPRET_NO_LISTS=1)"
 	elif [ -x "$LISTTOOL" ]; then
 		ZAPRET_BASE="$PREFIX/opt/zapret2" ZAPRET_RW="$PREFIX/opt/etc/zapret2" \
+		ZAPRET_CRONTAB="$PREFIX/opt/etc/crontabs/root" \
 			"$LISTTOOL" --bootstrap || true
 	fi
 

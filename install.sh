@@ -41,6 +41,7 @@ START_MODE=auto   # auto | never | always
 VERIFY=1
 FORCE=0
 WANT_LISTS=1
+WANT_CRON=1
 LIST_MODE=autohostlist
 # Берём именно этот скрипт: он скачивает доменный список ПЕРВЫМ делом и лишь
 # потом трогает ipset. У get_refilter_domains.sh и get_antizapret_domains.sh
@@ -72,6 +73,7 @@ usage()
   --no-lists      не качать список доменов, оставить MODE_FILTER=none
   --lists=SCRIPT  качать другим скриптом (см. zapret2-list --list)
   --hostlist      режим hostlist: только скачанный список, без самопополнения
+  --no-cron       не добавлять автообновление списка в cron
   --no-start      не запускать сервис вообще, только поставить и настроить
   --force-start   запускать даже если `zapret2 check` нашёл проблемы
   --no-verify     не сверять sha256 скачанного пакета (не надо так)
@@ -97,6 +99,7 @@ for a in "$@"; do
 		--no-lists)   WANT_LISTS=0 ;;
 		--lists=*)    LIST_SCRIPT=${a#--lists=} ;;
 		--hostlist)   LIST_MODE=hostlist ;;
+		--no-cron)    WANT_CRON=0 ;;
 		--no-start)   START_MODE=never ;;
 		--force-start) START_MODE=always ;;
 		--no-verify)  VERIFY=0 ;;
@@ -296,8 +299,14 @@ elif [ ! -x "$ZAPRET_LIST_BIN" ]; then
 	warn "нет $ZAPRET_LIST_BIN — список не скачать, остаётся MODE_FILTER=none"
 else
 	ZAPRET_BASE="$PREFIX/opt/zapret2" ZAPRET_RW="$PREFIX/opt/etc/zapret2" \
+	ZAPRET_CRONTAB="$PREFIX/opt/etc/crontabs/root" \
 	ZAPRET_BOOTSTRAP_SCRIPT="$LIST_SCRIPT" ZAPRET_BOOTSTRAP_MODE="$LIST_MODE" \
 		"$ZAPRET_LIST_BIN" --bootstrap || true
+	if [ "$WANT_CRON" = 0 ]; then
+		ZAPRET_CRONTAB="$PREFIX/opt/etc/crontabs/root" \
+			"$ZAPRET_LIST_BIN" --cron off >/dev/null 2>&1 || true
+		msg "автообновление списка не добавлено (--no-cron)"
+	fi
 fi
 
 # --- диагностика --------------------------------------------------------------
