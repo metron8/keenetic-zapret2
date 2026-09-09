@@ -1,13 +1,23 @@
 name: release
 
+# Версия берётся из Makefile: REF (тег zapret2) + PKG_REVISION (ревизия пакета).
+# Достаточно поднять PKG_REVISION и запушить в main — тег и релиз создадутся сами.
+# Если такой тег уже есть, ничего не происходит, так что обычные пуши в main
+# релиз не плодят.
+#
+# Тег создаёт сам шаг публикации (softprops умеет это через tag_name), а не
+# отдельный `git push --tags`. Так надо: события от GITHUB_TOKEN намеренно не
+# запускают другие workflow, поэтому запушенный отсюда тег не поднял бы сборку,
+# и релиз остался бы пустым.
 on:
   push:
+    branches: [main]
     tags: ['v*']
   workflow_dispatch:
     inputs:
       upstream_ref:
         description: 'Тег zapret2, из которого собирать (например v1.0.5.1)'
-        required: true
+        required: false
       pkg_revision:
         description: 'Ревизия пакета'
         required: false
@@ -17,8 +27,62 @@ permissions:
   contents: write
 
 jobs:
+  version:
+    name: определить версию
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      ref: ${{ steps.v.outputs.ref }}
+      rev: ${{ steps.v.outputs.rev }}
+      needed: ${{ steps.v.outputs.needed }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: v
+        env:
+          IN_REF: ${{ github.event.inputs.upstream_ref }}
+          IN_REV: ${{ github.event.inputs.pkg_revision }}
+          TAG_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          set -eu
+          if [ "$REF_TYPE" = tag ]; then
+            # Тег запушили руками — это явная заявка на релиз.
+            t=${TAG_NAME#v}
+            ref="v${t%-*}"
+            case "$t" in *-*) rev="${t##*-}" ;; *) rev=1 ;; esac
+            tag=$TAG_NAME
+            needed=true
+          elif [ -n "$IN_REF" ]; then
+            ref=$IN_REF
+            rev=${IN_REV:-1}
+            tag="v${ref#v}-$rev"
+            needed=true
+          else
+            # Пуш в main: версия из Makefile, релиз только если тега ещё нет.
+            ref=$(make print-REF)
+            rev=$(make print-PKG_REVISION)
+            tag="v${ref#v}-$rev"
+            if git ls-remote --tags --exit-code origin "refs/tags/$tag" >/dev/null 2>&1; then
+              needed=false
+            else
+              needed=true
+            fi
+          fi
+          echo "tag=$tag"       >>"$GITHUB_OUTPUT"
+          echo "ref=$ref"       >>"$GITHUB_OUTPUT"
+          echo "rev=$rev"       >>"$GITHUB_OUTPUT"
+          echo "needed=$needed" >>"$GITHUB_OUTPUT"
+          if [ "$needed" = true ]; then
+            echo "::notice::выпускаю $tag (zapret2 $ref, ревизия пакета $rev)"
+          else
+            echo "::notice::тег $tag уже существует — релиз не нужен"
+          fi
+
   build:
     name: сборка ${{ matrix.arch }}
+    needs: version
+    if: needs.version.outputs.needed == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -27,37 +91,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Тег репозитория имеет вид v<версия zapret2>-<ревизия пакета>, например
-      # v1.0.5.1-2 -> REF=v1.0.5.1, PKG_REVISION=2. Так версия пакета всегда
-      # однозначно сопоставляется с версией upstream.
-      - name: разобрать версию
-        id: ver
-        run: |
-          if [ -n "${{ github.event.inputs.upstream_ref }}" ]; then
-            ref='${{ github.event.inputs.upstream_ref }}'
-            rev='${{ github.event.inputs.pkg_revision }}'
-          else
-            tag='${{ github.ref_name }}'
-            tag=${tag#v}
-            ref="v${tag%-*}"
-            rev="${tag##*-}"
-            case "$tag" in
-              *-*) ;;
-              *) rev=1 ;;
-            esac
-          fi
-          echo "ref=$ref"  >>"$GITHUB_OUTPUT"
-          echo "rev=$rev"  >>"$GITHUB_OUTPUT"
-          echo "собираю zapret2 $ref, ревизия пакета $rev"
-
       - name: тесты
         run: make check && tests/run.sh
 
       - name: собрать .ipk
-        run: make ipk ARCH=${{ matrix.arch }} REF=${{ steps.ver.outputs.ref }} PKG_REVISION=${{ steps.ver.outputs.rev }}
+        run: make ipk ARCH=${{ matrix.arch }} REF=${{ needs.version.outputs.ref }} PKG_REVISION=${{ needs.version.outputs.rev }}
 
       - name: проверить .ipk
-        run: make inspect ARCH=${{ matrix.arch }} REF=${{ steps.ver.outputs.ref }} PKG_REVISION=${{ steps.ver.outputs.rev }}
+        run: make inspect ARCH=${{ matrix.arch }} REF=${{ needs.version.outputs.ref }} PKG_REVISION=${{ needs.version.outputs.rev }}
 
       - uses: actions/upload-artifact@v4
         with:
@@ -67,9 +108,9 @@ jobs:
 
   publish:
     name: выложить релиз
-    needs: build
+    needs: [version, build]
+    if: needs.version.outputs.needed == 'true'
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -86,6 +127,7 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.version.outputs.tag }}
           fail_on_unmatched_files: true
           body: |
             Пакет zapret2 для Keenetic (Entware).
@@ -94,7 +136,15 @@ jobs:
             проверены автоматически (CI), работоспособность на железе никто не
             подтверждал. Ставьте с оглядкой и имейте способ откатиться.
 
-            Установка на роутере:
+            Установка на роутере одной командой:
+            ```
+            curl -fL -o /opt/tmp/install.sh https://raw.githubusercontent.com/metron8/keenetic-zapret2/main/install.sh
+            sh /opt/tmp/install.sh
+            ```
+            Скрипт сам определит архитектуру, скачает нужный пакет, сверит sha256,
+            пропишет WAN-интерфейс и наполнит список доменов.
+
+            Либо вручную:
             ```
             opkg install /opt/tmp/zapret2_<версия>_<арх>.ipk
             zapret2 check

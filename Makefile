@@ -11,7 +11,8 @@ SHELL := /bin/sh
 # Версия zapret2, из которой собираем пакет (git-тег upstream).
 REF ?= v1.0.5.1
 # Ревизия самого пакета: меняй, если пересобираешь ту же версию zapret2.
-PKG_REVISION ?= 1
+# Это единственный источник версии для релиза: подними — и CI выпустит тег.
+PKG_REVISION ?= 2
 # Архитектура Entware. Список: make archs
 ARCH ?= mipsel-3.4
 ARCHS := mipsel-3.4 aarch64-3.10

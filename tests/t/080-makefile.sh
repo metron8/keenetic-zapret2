@@ -27,22 +27,25 @@ cp -a "$ROOT" "$repo"
 rm -rf "$repo/build" "$repo/dist" "$repo/.git"
 
 REF=vtest
+# Ревизию задаём явно: тест не должен зависеть от того, какой PKG_REVISION
+# сейчас стоит в Makefile — он меняется при каждом релизе.
+REV=1
 make_fake_upstream "$repo/build/src/$REF"
 touch "$repo/build/src/$REF/.stamp"
 
 bin="$TMP/bin"; mkdir -p "$bin"
 for f in nfqws2 mdig ip2net; do make_stub_elf mipsel-3.4 "$bin/$f"; done
 
-if out=$(make -C "$repo" --no-print-directory ipk REF="$REF" ARCH=mipsel-3.4 \
+if out=$(make -C "$repo" --no-print-directory ipk REF="$REF" PKG_REVISION="$REV" ARCH=mipsel-3.4 \
               BINSRC=local BINDIR="$bin" 2>&1); then
 	ok "make ipk проходит офлайн от дерева до пакета"
 else
 	bad "make ipk упал"
 	echo "$out" | sed 's/^/        /'
 fi
-assert_file "$repo/dist/zapret2_test-1_mipsel-3.4.ipk" "пакет лёг в dist с ожидаемым именем"
+assert_file "$repo/dist/zapret2_test-${REV}_mipsel-3.4.ipk" "пакет лёг в dist с ожидаемым именем"
 
-if out=$(make -C "$repo" --no-print-directory inspect REF="$REF" ARCH=mipsel-3.4 \
+if out=$(make -C "$repo" --no-print-directory inspect REF="$REF" PKG_REVISION="$REV" ARCH=mipsel-3.4 \
               BINSRC=local BINDIR="$bin" 2>&1); then
 	ok "make inspect принимает собранный пакет"
 else
@@ -53,9 +56,9 @@ fi
 # смена источника обязана привести к пересборке, а не переиспользованию
 bin2="$TMP/bin2"; mkdir -p "$bin2"
 for f in nfqws2 mdig ip2net; do make_stub_elf aarch64-3.10 "$bin2/$f"; done
-make -C "$repo" --no-print-directory ipk REF="$REF" ARCH=aarch64-3.10 \
+make -C "$repo" --no-print-directory ipk REF="$REF" PKG_REVISION="$REV" ARCH=aarch64-3.10 \
      BINSRC=local BINDIR="$bin2" >/dev/null 2>&1
-if make -C "$repo" --no-print-directory inspect REF="$REF" ARCH=aarch64-3.10 \
+if make -C "$repo" --no-print-directory inspect REF="$REF" PKG_REVISION="$REV" ARCH=aarch64-3.10 \
         BINSRC=local BINDIR="$bin2" >/dev/null 2>&1; then
 	ok "вторая арка собирается и проходит проверку рядом с первой"
 else
@@ -68,7 +71,7 @@ assert_status 0 make -C "$repo" --no-print-directory help
 
 # --- clean убирает артефакты, но не исходники ---------------------------------
 make -C "$repo" --no-print-directory clean >/dev/null 2>&1
-assert_nofile "$repo/dist/zapret2_test-1_mipsel-3.4.ipk" "clean убирает dist"
+assert_nofile "$repo/dist/zapret2_test-${REV}_mipsel-3.4.ipk" "clean убирает dist"
 assert_file "$repo/build/src/$REF/config.default" "clean не трогает выкачанные исходники"
 
 finish

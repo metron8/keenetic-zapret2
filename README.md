@@ -83,6 +83,29 @@ make ipk ARCH=mipsel-3.4 BINSRC=source
 | `make check-config` | сверить наш `config` с `config.default` upstream — ловит расхождения после обновления zapret2 |
 | `make clean` / `make distclean` | убрать артефакты |
 
+### Выпуск новой версии
+
+Версия релиза задана в `Makefile` двумя переменными: `REF` — тег upstream
+zapret2, `PKG_REVISION` — ревизия самого пакета. Тег репозитория из них
+складывается: `v<REF без v>-<PKG_REVISION>`.
+
+Чтобы выпустить релиз, достаточно поднять нужную переменную и запушить в `main`
+— workflow `release` сам создаст тег, соберёт обе арки и выложит `.ipk` с
+контрольными суммами. Если такой тег уже есть, ничего не происходит, так что
+обычные пуши релиз не плодят.
+
+```bash
+# пересобрать ту же версию zapret2 → PKG_REVISION 2 → 3
+# перейти на новую версию upstream → REF, а PKG_REVISION вернуть в 1
+```
+
+`TAG` в `install.sh` надо поднять тем же коммитом: скрипт standalone, версию ему
+взять неоткуда. За совпадение отвечает тест `t/120-version-consistency.sh` — он
+упадёт, если забыть.
+
+Тег можно поставить и руками (`git tag -a v1.0.5.1-3 && git push origin ...`) —
+этот путь тоже работает.
+
 Переменные: `REF` (тег zapret2, по умолчанию `v1.0.5.1`), `ARCH`, `BINSRC`
 (`release` \| `source` \| `local`), `BINDIR` (для `BINSRC=local`), `PKG_REVISION`,
 `INCLUDE_BLOCKCHECK`.

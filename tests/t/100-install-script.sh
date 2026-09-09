@@ -6,7 +6,9 @@
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
-VER=1.0.5.1-1
+# Версию берём из самого install.sh, иначе тест пришлось бы править при каждом
+# бампе PKG_REVISION. За совпадение с Makefile отвечает t/120.
+VER=$(sed -n 's/^TAG=v//p' "$ROOT/install.sh" | head -n1)
 
 # Песочница: prefix-корень, каталог «релиза», каталог стабов для PATH.
 # setup <имя> [конфиг-шаблон]
